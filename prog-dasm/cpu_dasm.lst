@@ -4,13 +4,19 @@
 
 ;Peripherials:
 ;0Eh -
-;0Fh -
+;0Fh - keyboard related, input
 ;1Ah - 8251 data reg
 ;1Bh - 8251 control reg
 ;2Ah - 
+;2Bh - keyboard related, output
+;2Dh - keyboard related, output
 ;30h - 
 ;32h - 
 ;40h - possibly a printer port?
+
+;Interrupts
+;Seems like interrupts are used to get CPU out of the HALT state, so most likely
+;INT is simple timer. HLT instruction is used as some kind of the delay.
 
 ;Addressing:
 0000h - 0FFFh - main ROM
@@ -18,8 +24,9 @@
 4000h - 5000h - RAM?
 
 ;Control regiters:
-4005h - 
-4006h - 
+4002,3h - seems like current symbol address in memory, cursor position
+4005h - current line number?
+4006h - current symbol number in line?
 4007h - 
 	0
 	1
@@ -29,8 +36,10 @@
 	5
 	6
 	7
-401ch - 
-47A8,9h - some kind of FIFO addresses?
+;401Ch - maybe this stores ON LINE status?
+;4017,8h - some kind of pointer
+;47A8,9h - some kind of FIFO addresses?
+;48B2h - 4901h - one row full of 20h, maybe status line?
 	
 ;Video line structure in memory:
 ....video data x80...?? (two more symbols with unknown function)
@@ -43,6 +52,7 @@
 ;What's at 1000h? Seems like additional or test ROM.
 ;0x1B seems to be 8251 becaue init sequence seems correct
 ;What's 48B2? Related to video RAM most likely
+;around E1B there are patterns for keyboard functionality.
 
 L0120:  MVI A,0FH		;Program start - address 0000h	
 		OUT 40H			;Printer port init?
@@ -67,7 +77,11 @@ L0120:  MVI A,0FH		;Program start - address 0000h
 		LXI H,0D9CH
 		LXI D,4002H
 		CALL L0002		;Copies some data from ROM to RAM. What data?
-		
+	
+						;Inits:
+						;..
+						;..
+						;Checks if serial line is available
 		CALL L0003		;Hardware init?
 
 L0006:  CALL L0004		;Constant program loop?
@@ -237,6 +251,9 @@ L0006:  CALL L0004		;Constant program loop?
 0176   0162 C9                  RET
 0177   0163 CD 15 0C    L0026:  CALL L0030
 0178   0166 C3 3E 01            JMP L0031
+
+											;This seems to be keyboard initialisation
+
 0179   0169 DB 0F       L0154:  IN 0FH
 0180   016B 47                  MOV B,A
 0181   016C E6 1C               ANI 1CH
@@ -272,19 +289,26 @@ L0006:  CALL L0004		;Constant program loop?
 0204   019C D3 30       L0037:  OUT 30H
 0205   019E F6 01               ORI 01H		;0b00000001
 0206   01A0 C9                  RET
-0207   01A1 21 B2 48    L0186:  LXI H,48B2H
-0208   01A4 16 00               MVI D,00H
-0209   01A6 1E 2B               MVI E,2BH
-0210   01A8 19                  DAD D
-0211   01A9 EB                  XCHG
-0212   01AA 21 69 0E            LXI H,0E69H
-0213   01AD C3 AE 0C            JMP L0038
-0214   01B0 DB 2B       L0033:  IN 2BH
-0215   01B2 2F                  CMA
-0216   01B3 E6 81               ANI 81H
-0217   01B5 C2 C4 01            JNZ L0034
-0218   01B8 CD 2F 0F            CALL L0035
-0219   01BB CA C1 01            JZ L0036
+
+						;Comes here from the keyboard function after the control sequence output
+						;and just in case that data is read?
+						;Or other possibility - it detects that printer is not 
+						;ready and outputs the message.
+
+L0186:  LXI H,48B2H		;Beginning of the status line?
+		MVI D,00H
+		MVI E,2BH		;Jumps 23 chars forward
+		DAD D
+		XCHG
+		LXI H,0E69H		;Beginning of the PRINTER NOT READY line
+		JMP L0038		;Outputs the message
+		
+L0033:  IN 2BH
+		CMA
+		ANI 81H
+		JNZ L0034
+		CALL L0035
+		JZ L0036
 0220   01BE 79                  MOV A,C
 0221   01BF D3 2A               OUT 2AH
 0222   01C1 F6 01       L0036:  ORI 01H
@@ -834,29 +858,38 @@ L0182:  LXI D,48B2H
 		MVI A,20H
 		JMP L0050	;Clears 80 symbols in address 48B2h. One row.
 
+											;Jumps here after 8251 init and DSR state check
+											;Jumps here on fault.
 
-0750   0639 21 B2 48    L0042:  LXI H,48B2H
-0751   063C 16 00               MVI D,00H
-0752   063E 1E 12               MVI E,12H
-0753   0640 19                  DAD D
-0754   0641 EB                  XCHG
-0755   0642 21 39 0E            LXI H,0E39H
-0756   0645 CD AE 0C            CALL L0038
-0757   0648 3A 1C 40    L0044:  LDA 401CH
-0758   064B E6 80               ANI 80H
-0759   064D CA 00 00            JZ L0120
-0760   0650 3E 00               MVI A,00H
-0761   0652 D3 1B               OUT 1BH		;Serial
-0762   0654 3E 0F               MVI A,0FH
-0763   0656 CD 8F 0B            CALL L0065
-0764   0659 3E 02               MVI A,02H
-0765   065B CD 89 0B            CALL L0021
-0766   065E AF                  XRA A
-0767   065F C9                  RET
-0768   0660 CD 61 0B    L0155:  CALL L0121
-0769   0663 C8                  RZ
-0770   0664 3E 81               MVI A,81H
-0771   0666 C3 89 0B            JMP L0021
+L0042:  LXI H,48B2H	;Status line start address
+		MVI D,00H
+		MVI E,12H	;DE=12h
+		DAD D		;HL=HL+DE
+		XCHG
+		LXI H,0E39H	;Start address of the DATA LINE NOT READY message
+		CALL L0038	;Show DATA LINE NOT READY message
+L0044:  LDA 401CH
+		ANI 80H		;Maybe checks ON LINE status?
+		JZ L0120
+		MVI A,00H
+		OUT 1BH		;Outputs 00h to 8251 command reg, disables tx, tx, RTS and DTR
+		MVI A,0FH
+		CALL L0065	;Clears four LSB in 4007h
+		MVI A,02H
+		CALL L0021	;Sets 02h in 4007
+		XRA A
+		RET
+
+								;Jums here after keyboard initialisation on a condition,
+								;seems like hw init continues here.
+
+L0155:  CALL L0121
+												;Returns with modified 4007h here
+												;Or with 0 if data line is not ready
+		RZ				;Returns if DSR not ready
+		MVI A,81H		;Sets 4007 status bits if line ready
+		JMP L0021		
+
 0772   0669 3A 07 40            LDA 4007H
 0773   066C E6 02               ANI 02H
 0774   066E C8                  RZ
@@ -1161,16 +1194,21 @@ L0182:  LXI D,48B2H
 1073   08CE CD A5 0F            CALL L0050
 1074   08D1 C3 8D 09            JMP L0062
 
-1075   08D4 87          L0009:  ADD A
+								;What happens here? It doubles the A reg and adds it to the
+								;constant 4902h. In 4902h there is an address of the last
+								;line on the screen. It seems that this function is getting the 
+								;address of requested screen line.
+
+1075   08D4 87          L0009:  ADD A		;A=A*2
 1076   08D5 5F                  MOV E,A
 1077   08D6 16 00               MVI D,00H
 1078   08D8 21 02 49            LXI H,4902H
-1079   08DB 19                  DAD D
+1079   08DB 19                  DAD D		;LH=4902h+(2*line number)
 1080   08DC 5E                  MOV E,M
 1081   08DD 23                  INX H
 1082   08DE 56                  MOV D,M
 1083   08DF EB                  XCHG
-1084   08E0 C9                  RET
+1084   08E0 C9                  RET			;Returns with requested line address in HL
 
 											;Hardware init?
 L0003:  MVI A,0A7H	;Set 8251 mode register
@@ -1183,13 +1221,15 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 		OUT 1BH
 
 		CALL L0152	;Sets some kind of status in 4007h and clears a line in 48B2h?
-		CALL L0153	;Initialises two symbols in every row
-		CALL L0076
-1096   08FA CD 69 01            CALL L0154
-1097   08FD DB 0F               IN 0FH
-1098   08FF E6 01               ANI 01H
-1099   0901 C8                  RZ
-1100   0902 C3 60 06            JMP L0155
+		CALL L0153	;Initialises row addresses
+		CALL L0076	;Screen wipe, cursor init
+		CALL L0154	;Keyboard or printer init?
+		
+		IN 0FH		;Reads keyboard status?	Or ON LINE status?
+		ANI 01H		
+		RZ
+		JMP L0155	;
+
 1101   0905 2A 02 40    L0069:  LHLD 4002H
 1102   0908 7E          L0157:  MOV A,M
 1103   0909 E6 80               ANI 80H
@@ -1278,6 +1318,12 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 1185   098C C9                  RET
 
 											;Jumps here at the initialisation after the screen wipe
+											;Seems like this function calculates the address in the
+											;memory where the cursor is located.
+											;It takes 4005 (current line) and calculates the line start address.
+											;After that, it takes 4006 (currecnt symbol in line) and adds
+											;to the previously calculated address, thus getting
+											;the address of the current symbol in memory.
 
 1186   098D 3A 05 40    L0062:  LDA 4005H
 1187   0990 CD D4 08            CALL L0009
@@ -1464,7 +1510,8 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 1366   0AE7 B0                  ORA B
 1367   0AE8 C9                  RET
 
-						;This function adds two symbols in every line. Reason unclear. ?
+						;This function seems to be initialising the row start addresses
+						;in the end of the RAM ?
 
 L0153:  MVI A,18H		;A=24 (line count)
 		LXI B,0050H		;BC=50 (symbol count)
@@ -1523,31 +1570,31 @@ L0177:  XCHG
 1419   0B49 1E 40               MVI E,40H
 1420   0B4B 19                  DAD D
 1421   0B4C EB                  XCHG
-1422   0B4D 21 7D 0E            LXI H,0E7DH
+1422   0B4D 21 7D 0E            LXI H,0E7DH		;Start address of TERMINAL READY message
 1423   0B50 C3 AE 0C            JMP L0038
 
-1424   0B53 3E 20       L0076:  MVI A,20H
-1425   0B55 11 28 40            LXI D,4028H
-1426   0B58 21 80 07            LXI H,0780H
-1427   0B5B CD A5 0F            CALL L0050	;Fills 1920 bytes from 4028h onwards with 20h (space)
-											;Most likely screen wipe.
-1428   0B5E C3 37 03            JMP L0068
+L0076:  MVI A,20H
+		LXI D,4028H
+		LXI H,0780H
+		CALL L0050		;Fills 1920 bytes from 4028h onwards with 20h (space)
+						;Most likely screen wipe.
+		JMP L0068
 
-1429   0B61 CD 2E 06    L0121:  CALL L0182
-1430   0B64 3E 27               MVI A,27H
-1431   0B66 D3 1B               OUT 1BH		;Serial
-1432   0B68 CD D7 0F            CALL L0183
-1433   0B6B DB 1B               IN 1BH		;Serial
-1434   0B6D E6 80               ANI 80H
-1435   0B6F CA 39 06            JZ L0042
+1429   0B61 CD 2E 06    L0121:  CALL L0182	;Wipes status line
+1430   0B64 3E 27               MVI A,27H	;Enables 8251 tx, rx, RTS and DTR
+1431   0B66 D3 1B               OUT 1BH		;Writes 8251 command
+1432   0B68 CD D7 0F            CALL L0183	;Delay
+1433   0B6B DB 1B               IN 1BH		;Reads 8251 status
+1434   0B6D E6 80               ANI 80H		;Tests DSR state
+1435   0B6F CA 39 06            JZ L0042	;Jumps to 0042 if DSR inactive
 1436   0B72 3E FF               MVI A,0FFH
-1437   0B74 21 A8 47            LXI H,47A8H
-1438   0B77 CD 9F 0E            CALL L0184
+1437   0B74 21 A8 47            LXI H,47A8H	;Address just after the screen end
+1438   0B77 CD 9F 0E            CALL L0184	;Outputs FFh in three consecutive addresses
 1439   0B7A 3E 03               MVI A,03H
 1440   0B7C 21 AB 48            LXI H,48ABH
-1441   0B7F CD 9F 0E            CALL L0184
+1441   0B7F CD 9F 0E            CALL L0184	;Outputs 03h in three consecutive addresses
 1442   0B82 3E 0F               MVI A,0FH
-1443   0B84 CD 8F 0B            CALL L0065
+1443   0B84 CD 8F 0B            CALL L0065	;Clears four LSB in 4007h?
 1444   0B87 3C                  INR A
 1445   0B88 C9                  RET
 
@@ -1567,34 +1614,43 @@ L0177:  XCHG
 1457   0B9A 77                  MOV M,A
 1458   0B9B C9                  RET
 
-1459   0B9C 0F          L0032:  RRC
-1460   0B9D 0F                  RRC
-1461   0B9E 21 1B 0E            LXI H,0E1BH
-1462   0BA1 16 00               MVI D,00H
-1463   0BA3 5F                  MOV E,A
-1464   0BA4 19                  DAD D
-1465   0BA5 4E                  MOV C,M
-1466   0BA6 78                  MOV A,B
-1467   0BA7 E6 02               ANI 02H
-1468   0BA9 C2 CB 0B            JNZ L0185
-1469   0BAC 06 5A               MVI B,5AH
-1470   0BAE 79          L0187:  MOV A,C
-1471   0BAF D3 2D               OUT 2DH
-1472   0BB1 3E A7               MVI A,0A7H
-1473   0BB3 D3 2B               OUT 2BH
-1474   0BB5 3E 40               MVI A,40H
-1475   0BB7 D3 2B               OUT 2BH
-1476   0BB9 78                  MOV A,B
-1477   0BBA D3 2B               OUT 2BH
-1478   0BBC 3E 27               MVI A,27H
-1479   0BBE D3 2B               OUT 2BH
-1480   0BC0 CD D7 0F            CALL L0183
-1481   0BC3 DB 2B               IN 2BH
-1482   0BC5 E6 80               ANI 80H
-1483   0BC7 CA A1 01            JZ L0186
-1484   0BCA C9                  RET
-1485   0BCB 06 7A       L0185:  MVI B,7AH
-1486   0BCD C3 AE 0B            JMP L0187
+								;This might be the function that gets the symbol codes
+								;in respect to the keyboard scancodes. The data in B is the raw scancode
+								;that is read from the 0Fh, but A is the same code ANDed with 1Ch.
+								;After two first rotate instructions A becomes
+								;max 00h-07h.
+
+L0032:  RRC	
+		RRC
+		LXI H,0E1BH		;Loads some kind of ROM address where pattern
+												;00 02 04 08 10 20 40 80 is located
+		MVI D,00H
+		MOV E,A			
+		DAD D			;Adds the mentioned argument to the address
+		MOV C,M			;and gets mentioned data out from the ROM in C reg
+		MOV A,B
+		ANI 02H			;Tests if the scancode bit 02h is set
+		JNZ L0185		;If it is, jumps to L0185
+		MVI B,5AH		;01011010
+L0187:  MOV A,C			;Seems like this is the control sequence of the keyboard
+		OUT 2DH			
+		MVI A,0A7H		;10100111
+		OUT 2BH
+		MVI A,40H		;01000000
+		OUT 2BH
+		MOV A,B			;01011010 or 01111010, depends
+		OUT 2BH
+		MVI A,27H		;00100111
+		OUT 2BH
+		CALL L0183		;delay
+		IN 2BH			;Reads data from the keyboard
+		ANI 80H			;Tests MSB
+		JZ L0186		;If MSB=0 then goes to L0186. Or else returns.
+		RET
+
+L0185:  MVI B,7AH
+		JMP L0187
+
 1487   0BD0 CD E9 0A    L0147:  CALL L0153
 1488   0BD3 21 28 40            LXI H,4028H
 1489   0BD6 CD F5 0B            CALL L0188
@@ -1727,18 +1783,22 @@ L0177:  XCHG
 1616   0CAC 4E                  MOV C,M
 1617   0CAD C9                  RET
 
-											;DATA?
+										;Function that outputs message located at HL with
+										;predefined length in first byte and outputs the message
+										;to DE
 
-1618   0CAE 4E          L0038:  MOV C,M
+1618   0CAE 4E          L0038:  MOV C,M		;Reads message length
 1619   0CAF 23                  INX H
-1620   0CB0 7E          L0195:  MOV A,M
-1621   0CB1 F6 80               ORI 80H
-1622   0CB3 12                  STAX D
+1620   0CB0 7E          L0195:  MOV A,M		;Reads message data from the ROM
+1621   0CB1 F6 80               ORI 80H		;Disables the highlight?
+1622   0CB3 12                  STAX D		;Saves to D address
 1623   0CB4 23                  INX H
 1624   0CB5 13                  INX D
 1625   0CB6 0D                  DCR C
-1626   0CB7 C2 B0 0C            JNZ L0195
+1626   0CB7 C2 B0 0C            JNZ L0195	;Loops C reg times
 1627   0CBA C9                  RET
+
+									;DATA?
 1628   0CBB 00                  NOP
 1629   0CBC 14                  INR D
 1630   0CBD 3B                  DCX SP
@@ -2146,12 +2206,16 @@ L0177:  XCHG
 2032   0E9C 20                  RIM
 2033   0E9D 20                  RIM
 2034   0E9E 20                  RIM
-2035   0E9F 77          L0184:  MOV M,A
-2036   0EA0 23                  INX H
-2037   0EA1 77                  MOV M,A
-2038   0EA2 23                  INX H
-2039   0EA3 77                  MOV M,A
-2040   0EA4 C9                  RET
+
+								;Outputs A in three consecutive memory locations
+
+L0184:  MOV M,A
+		INX H
+		MOV M,A
+		INX H
+		MOV M,A
+		RET
+
 2041   0EA5 7E          L0024:  MOV A,M
 2042   0EA6 23                  INX H
 2043   0EA7 46                  MOV B,M
@@ -2386,11 +2450,15 @@ L0050:  STAX D		;Saves code from A into the memory
 2262   0FD2 05                  DCR B
 2263   0FD3 C2 CF 0F            JNZ L0211
 2264   0FD6 C9                  RET
-2265   0FD7 3E FA       L0183:  MVI A,0FAH
-2266   0FD9 76          L0212:  HLT
-2267   0FDA 3D                  DCR A
-2268   0FDB C2 D9 0F            JNZ L0212
-2269   0FDE C9                  RET
+
+								;This is called from the keyboard function
+								;Seems like some kind of delay that loops for
+								;FAh times with HLT instruction
+L0183:  MVI A,0FAH
+L0212:  HLT
+		DCR A
+		JNZ L0212
+		RET
 
 
 					;This function reads data from the ROM and copies it to the RAM
