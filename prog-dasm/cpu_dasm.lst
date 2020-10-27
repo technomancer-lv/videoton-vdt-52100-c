@@ -3,10 +3,12 @@
 ;--------------------------------------------------
 
 ;Peripherials:
+;0Ch - 
 ;0Eh -
 ;0Fh - keyboard related, input
 ;1Ah - 8251 data reg
 ;1Bh - 8251 control reg
+;1Dh - baudrate control
 ;2Ah - 
 ;2Bh - keyboard related, output
 ;2Dh - keyboard related, output
@@ -19,31 +21,37 @@
 ;INT is simple timer. HLT instruction is used as some kind of the delay.
 
 ;Addressing:
-0000h - 0FFFh - main ROM
-1000h - ????h - additional ROM
-4000h - 5000h - RAM?
+;0000h - 0FFFh - main ROM
+;1000h - ????h - additional ROM
+;4000h - 5000h - RAM?
 
 ;Control regiters:
-4002,3h - seems like current symbol address in memory, cursor position
-4005h - current line number?
-4006h - current symbol number in line?
-4007h - 
-	0
-	1
-	2 - ?
-	3
-	4
-	5
-	6
-	7
+;4002,3h - seems like current symbol address in memory, cursor position
+;4005h - current line number?
+;4006h - current symbol number in line?
+;4007h - 
+;	0 - something on-line related
+;	1
+;	2 - ?
+;	3
+;	4
+;	5
+;	6
+;	7 - something on-line related, RTS is set depending on this
+
+;400Ah - 
 ;401Ch - maybe this stores ON LINE status?
+;401Dh - baud rate and format register
+;		high nibble - baudrate
+;			
+;		low nibble - format
+
 ;4017,8h - some kind of pointer
 ;47A8,9h - some kind of FIFO addresses?
 ;48B2h - 4901h - one row full of 20h, maybe status line?
 	
 ;Video line structure in memory:
-....video data x80...?? (two more symbols with unknown function)
-4931, 4932 is the last two bytes in the line. Or fit ones?
+;..
 
 ;NOTES
 ;4000h, 5000h - definitely RAM, possible that 5000h is the end as it's initialised as a SP
@@ -84,22 +92,25 @@ L0120:  MVI A,0FH		;Program start - address 0000h
 						;Checks if serial line is available
 		CALL L0003		;Hardware init?
 
-L0006:  CALL L0004		;Constant program loop?
+						;Constant program loop
+L0006:  CALL L0004		;Serial routine
 		PUSH B
-		CNZ L0005
+		CNZ L0005		
 		POP B
 		MOV A,C
 		ANI 7FH
 		STA 4020H
-		JMP L0006		;Constant program loop?
+		JMP L0006		;Constant program loop end
+
+		;Is it possible to somehow get in this code?
 
 0024   0036 FF                  RST 7
 0025   0037 FF                  RST 7
-0026   0038 E5                  PUSH H
+		PUSH H
 0027   0039 2A 00 40            LHLD 4000H
 0028   003C E9                  PCHL
 0029   003D F5                  PUSH PSW
-0030   003E D5                  PUSH D
+		PUSH D
 0031   003F 21 08 40            LXI H,4008H
 0032   0042 35                  DCR M
 0033   0043 FA 99 00            JM L0007
@@ -217,39 +228,43 @@ L0006:  CALL L0004		;Constant program loop?
 0143   0124 D3 1A               OUT 1AH		;Serial data
 0144   0126 C9                  RET
 
-0145   0127 21 1D 40    L0049:  LXI H,401DH
+0145   0127 21 1D 40    L0049:  LXI H,401DH	;Read baudrate reg
 0146   012A DB 0C               IN 0CH
-0147   012C BE                  CMP M
-0148   012D C8                  RZ
-0149   012E 7E                  MOV A,M
-0150   012F E6 F0               ANI 0F0H
+0147   012C BE                  CMP M		;Checks if baudrate change requested?
+0148   012D C8                  RZ			;Returns if no?
+0149   012E 7E                  MOV A,M		;Reads baudrate reg into A
+0150   012F E6 F0               ANI 0F0H	;Filters out only baudrate parameter
 0151   0131 47                  MOV B,A
-0152   0132 DB 0C               IN 0CH
-0153   0134 77                  MOV M,A
-0154   0135 E6 F0               ANI 0F0H
+0152   0132 DB 0C               IN 0CH		;Whats in OCh???
+0153   0134 77                  MOV M,A		;Copies 0Ch into baudrate reg
+0154   0135 E6 F0               ANI 0F0H	;Checks if baudrate is changed
 0155   0137 B8                  CMP B
-0156   0138 C2 63 01            JNZ L0026
-0157   013B CD 60 0C            CALL L0027
-0158   013E 3A 1D 40    L0031:  LDA 401DH
-0159   0141 E6 80               ANI 80H
-0160   0143 CA 4A 01            JZ L0028
-0161   0146 78                  MOV A,B
+0156   0138 C2 63 01            JNZ L0026	;If yes - baudrate display
+0157   013B CD 60 0C            CALL L0027	;If no - format display
+
+0158   013E 3A 1D 40    L0031:  LDA 401DH	;Reads baudrate setting reg
+0159   0141 E6 80               ANI 80H		;If lower than 9600 (because 9600 is setting number
+											;higher than 7 and it's stored as four MSB in 401Dh)
+0160   0143 CA 4A 01            JZ L0028	;If lower, jumps to L0028
+											;Else if 9600:
+0161   0146 78                  MOV A,B		;What's in the B at this point? Format parameter?
 0162   0147 F6 01               ORI 01H
 0163   0149 47                  MOV B,A
-0164   014A 79          L0028:  MOV A,C
-0165   014B D3 1D               OUT 1DH
-0166   014D 3E 40               MVI A,40H
-0167   014F D3 1B               OUT 1BH		;Serial
-0168   0151 78                  MOV A,B
-0169   0152 D3 1B               OUT 1BH		;Serial
-0170   0154 3A 07 40    L0022:  LDA 4007H
-0171   0157 E6 80               ANI 80H
+0164   014A 79          L0028:  MOV A,C		;What's in the C?
+0165   014B D3 1D               OUT 1DH		;Outputs the baudrate parameter to the physical register
+0166   014D 3E 40               MVI A,40H	;Reset the 8251
+0167   014F D3 1B               OUT 1BH		
+0168   0151 78                  MOV A,B		;Sets the 8251 mode parameter
+0169   0152 D3 1B               OUT 1BH
+0170   0154 3A 07 40    L0022:  LDA 4007H	;Tests if it's online? Or transmission disabled?
+0171   0157 E6 80               ANI 80H		
 0172   0159 3E 27               MVI A,27H
 0173   015B C2 60 01            JNZ L0029
 0174   015E 3E 07               MVI A,07H
-0175   0160 D3 1B       L0029:  OUT 1BH		;Serial	
+0175   0160 D3 1B       L0029:  OUT 1BH		;Enables 8251 tx, rx, DTR and if needed - RTS
 0176   0162 C9                  RET
-0177   0163 CD 15 0C    L0026:  CALL L0030
+
+0177   0163 CD 15 0C    L0026:  CALL L0030	;Display baudrate message and baudrate
 0178   0166 C3 3E 01            JMP L0031
 
 											;This seems to be keyboard initialisation
@@ -311,30 +326,33 @@ L0033:  IN 2BH
 		JZ L0036
 0220   01BE 79                  MOV A,C
 0221   01BF D3 2A               OUT 2AH
-0222   01C1 F6 01       L0036:  ORI 01H
-0223   01C3 C9                  RET
-0224   01C4 AF          L0034:  XRA A
-0225   01C5 C9                  RET
+
+L0036:  ORI 01H		;This function returns with something other than 0 in A
+		RET
+
+L0034:  XRA A		;This function returns with 0 in A
+		RET
 
 											;This is being called from the program loop
 											;Might be data exchange with serial
 
-0226   01C6 3A 07 40    L0004:  LDA 4007H
-0227   01C9 E6 02               ANI 02H
-0228   01CB C2 1F 02            JNZ L0039
-0229   01CE CD E3 01            CALL L0040
-0230   01D1 C0                  RNZ
-0231   01D2 CD 1F 02            CALL L0039
-0232   01D5 C8                  RZ
-0233   01D6 3A 07 40            LDA 4007H
-0234   01D9 E6 80               ANI 80H
-0235   01DB CA C1 01            JZ L0036
-0236   01DE CD F3 01            CALL L0041
-0237   01E1 AF                  XRA A
-0238   01E2 C9                  RET
+L0004:  LDA 4007H
+		ANI 02H					;Checks bit 1 in reg 4007h
+		JNZ L0039
+		CALL L0040				;Possibly checks data fifo status and DSR status
+		RNZ						;If DSR is inactive, it returns from this function
+								;Else
+		CALL L0039				;Possibly checks second fifo
+		RZ
+		LDA 4007H				;Checks MSB in 4007h
+		ANI 80H
+		JZ L0036				;If 0, returns with 1 in A
+		CALL L0041
+		XRA A
+		RET
 
 0239   01E3 21 A8 47    L0040:  LXI H,47A8H
-0240   01E6 CD B8 0E            CALL L0025
+0240   01E6 CD B8 0E            CALL L0025	;FIFO?
 0241   01E9 C0                  RNZ
 0242   01EA DB 1B               IN 1BH		;Serial status read
 0243   01EC E6 80               ANI 80H		;Checks if DSR bit is 0?
@@ -342,25 +360,25 @@ L0033:  IN 2BH
 0245   01F1 AF                  XRA A		;If it's not, returns with 0 in A
 0246   01F2 C9                  RET
 
-0247   01F3 3E 32       L0041:  MVI A,32H
-0248   01F5 32 1E 40            STA 401EH
-0249   01F8 DB 1B       L0043:  IN 1BH		;Serial
-0250   01FA E6 80               ANI 80H
-0251   01FC CA 39 06            JZ L0042
-0252   01FF 21 AB 48            LXI H,48ABH
-0253   0202 CD A5 0E            CALL L0024
-0254   0205 C0                  RNZ
-0255   0206 3A 1E 40            LDA 401EH
-0256   0209 3D                  DCR A
-0257   020A C2 F8 01            JNZ L0043
-0258   020D 21 B2 48            LXI H,48B2H
-0259   0210 16 00               MVI D,00H
-0260   0212 1E 12               MVI E,12H
-0261   0214 19                  DAD D
-0262   0215 EB                  XCHG
-0263   0216 21 51 0E            LXI H,0E51H
-0264   0219 CD AE 0C            CALL L0038
-0265   021C C3 48 06            JMP L0044
+L0041:  MVI A,32H
+		STA 401EH
+L0043:  IN 1BH		;Reads 8251 status reg
+		ANI 80H		;Checks DSR state
+		JZ L0042	;Outputs DATA LINE NOT READY on fault and returns
+		LXI H,48ABH
+		CALL L0024	;?
+		RNZ
+		LDA 401EH
+		DCR A
+		JNZ L0043	;Loops 50 times to check DSR and???
+		LXI H,48B2H
+		MVI D,00H
+		MVI E,12H
+		DAD D
+		XCHG
+		LXI H,0E51H	;Start address of TRANSMISSION DISABLED message
+		CALL L0038	;Outputs TRANSMISSION DISABLED message
+		JMP L0044	;Checks DSR and ON LINE status and returns
 
 0266   021F C5          L0039:  PUSH B
 0267   0220 CD 7A 01            CALL L0045
@@ -376,16 +394,18 @@ L0033:  IN 2BH
 0277   0238 C9                  RET
 
 
-0278   0239 CD 27 01    L0048:  CALL L0049
+0278   0239 CD 27 01    L0048:  CALL L0049		;Calls baudrate setting and display, possibly after change
 0279   023C 21 0A 40            LXI H,400AH
 0280   023F AF                  XRA A
 0281   0240 BE                  CMP M
-0282   0241 C8                  RZ
-0283   0242 11 B2 48            LXI D,48B2H
+0282   0241 C8                  RZ				;Returns if 400Ah=0
+												;What's in 400Ah? Timer? key presses?
+
+0283   0242 11 B2 48            LXI D,48B2H		;Status line start address
 0284   0245 26 00               MVI H,00H
 0285   0247 2E 10               MVI L,10H
 0286   0249 3E 20               MVI A,20H
-0287   024B CD A5 0F            CALL L0050
+0287   024B CD A5 0F            CALL L0050		;Wipes status line
 0288   024E AF                  XRA A
 0289   024F 21 0A 40            LXI H,400AH
 0290   0252 46                  MOV B,M
@@ -397,7 +417,7 @@ L0033:  IN 2BH
 0296   0259 3E 03               MVI A,03H
 0297   025B 32 1A 40            STA 401AH
 0298   025E D3 0F               OUT 0FH
-0299   0260 21 BB 0C            LXI H,0CBBH
+0299   0260 21 BB 0C            LXI H,0CBBH		;0CBBh - scancode table? Almost sure
 0300   0263 19                  DAD D
 0301   0264 7E                  MOV A,M
 0302   0265 4F                  MOV C,A
@@ -405,7 +425,7 @@ L0033:  IN 2BH
 0304   0267 07                  RLC
 0305   0268 07                  RLC
 0306   0269 E6 07               ANI 07H
-0307   026B 21 2D 0D            LXI H,0D2DH
+0307   026B 21 2D 0D            LXI H,0D2DH		;Another table?
 0308   026E CD C3 0F            CALL L0051
 0309   0271 4F                  MOV C,A
 0310   0272 F6 01               ORI 01H
@@ -413,7 +433,7 @@ L0033:  IN 2BH
 
 											;This is being clled from the program loop
 
-0312   0275 79          L0005:  MOV A,C
+0312   0275 79          L0005:  MOV A,C		
 0313   0276 E6 60               ANI 60H
 0314   0278 CA 84 02            JZ L0052
 0315   027B CD 7D 08            CALL L0053
@@ -1676,6 +1696,7 @@ L0185:  MVI B,7AH
 1509   0BFB 0D                  DCR C
 1510   0BFC C2 F9 0B            JNZ L0193
 1511   0BFF C9                  RET
+
 1512   0C00 3E FC       L0190:  MVI A,0FCH
 1513   0C02 32 0B 40            STA 400BH
 1514   0C05 3E FF               MVI A,0FFH
@@ -1684,103 +1705,113 @@ L0185:  MVI B,7AH
 1517   0C0C 32 0D 40            STA 400DH
 1518   0C0F CD F5 0B            CALL L0188
 1519   0C12 C3 8D 09            JMP L0062
+
+												;Seems like baudrate output here
+
 1520   0C15 21 B2 48    L0030:  LXI H,48B2H
 1521   0C18 EB                  XCHG
-1522   0C19 21 23 0E            LXI H,0E23H
-1523   0C1C CD AE 0C            CALL L0038
+1522   0C19 21 23 0E            LXI H,0E23H		;Start address of BAUD RATE message pool
+1523   0C1C CD AE 0C            CALL L0038		;Output BAUD RATE message
 1524   0C1F D5                  PUSH D
-1525   0C20 3A 1D 40            LDA 401DH
-1526   0C23 2F                  CMA
-1527   0C24 E6 F0               ANI 0F0H
-1528   0C26 0F                  RRC
-1529   0C27 0F                  RRC
-1530   0C28 21 B3 0D            LXI H,0DB3H
-1531   0C2B 16 00               MVI D,00H
-1532   0C2D 5F                  MOV E,A
-1533   0C2E 19                  DAD D
-1534   0C2F 4E                  MOV C,M
-1535   0C30 23                  INX H
+1525   0C20 3A 1D 40            LDA 401DH		;Baud rate register? Loads into A
+1526   0C23 2F                  CMA				;Inverts A
+1527   0C24 E6 F0               ANI 0F0H		;clears four LSB
+1528   0C26 0F                  RRC				;Two times shifts right
+1529   0C27 0F                  RRC				;This makes A equal the number of baudrate
+												;setting times 4. Nut the actual baudrate, but
+												;its number in setting table.
+1530   0C28 21 B3 0D            LXI H,0DB3H		;Baud rate message start address
+1531   0C2B 16 00               MVI D,00H		
+1532   0C2D 5F                  MOV E,A			
+1533   0C2E 19                  DAD D			;Calculates baudrate message start address
+1534   0C2F 4E                  MOV C,M			;Reads first number, this is not text
+1535   0C30 23                  INX H			;Increases HL to first character
 1536   0C31 D1                  POP D
 1537   0C32 C5                  PUSH B
-1538   0C33 0E 03               MVI C,03H
-1539   0C35 FE 1C               CPI 1CH
-1540   0C37 CA 56 0C            JZ L0194
-1541   0C3A CD B0 0C            CALL L0195
-1542   0C3D 3E B0               MVI A,0B0H
+1538   0C33 0E 03               MVI C,03H		;Defines message length to be output - three characters
+1539   0C35 FE 1C               CPI 1CH			;Seems that this tests if the output message is the "75"
+												;that does not need trailing 0 added
+1540   0C37 CA 56 0C            JZ L0194		;Jumps to 75 output
+1541   0C3A CD B0 0C            CALL L0195		;Outputs three characters
+1542   0C3D 3E B0               MVI A,0B0H		;Outputs one more zero character
 1543   0C3F 12                  STAX D
 1544   0C40 13                  INX D
-1545   0C41 3E A0               MVI A,0A0H
+1545   0C41 3E A0               MVI A,0A0H		;Outputs additional space
 1546   0C43 12          L0196:  STAX D
-1547   0C44 3A 1D 40            LDA 401DH
+1547   0C44 3A 1D 40            LDA 401DH		;Here it seems that it prepares to output the format message
 1548   0C47 2F                  CMA
-1549   0C48 E6 0F               ANI 0FH
+1549   0C48 E6 0F               ANI 0FH			
 1550   0C4A 07                  RLC
 1551   0C4B 07                  RLC
-1552   0C4C 21 DB 0D            LXI H,0DDBH
+1552   0C4C 21 DB 0D            LXI H,0DDBH		;Start address of the format message pool
 1553   0C4F 16 00               MVI D,00H
 1554   0C51 5F                  MOV E,A
-1555   0C52 19                  DAD D
+1555   0C52 19                  DAD D			;Calculates format message start address
 1556   0C53 C1                  POP B
-1557   0C54 46                  MOV B,M
+1557   0C54 46                  MOV B,M			;Reads the status configuration parameter
 1558   0C55 C9                  RET
-1559   0C56 CD B0 0C    L0194:  CALL L0195
-1560   0C59 3E A0               MVI A,0A0H
+
+1559   0C56 CD B0 0C    L0194:  CALL L0195		;Outputs three symbols " 75"
+1560   0C59 3E A0               MVI A,0A0H		;Outputs additional space instead of 0
 1561   0C5B 12                  STAX D
 1562   0C5C 13                  INX D
 1563   0C5D C3 43 0C            JMP L0196
-1564   0C60 21 B2 48    L0027:  LXI H,48B2H
+
+											;Format display?
+
+1564   0C60 21 B2 48    L0027:  LXI H,48B2H	;First row of the status line
 1565   0C63 EB                  XCHG
 1566   0C64 21 2F 0E            LXI H,0E2FH
-1567   0C67 CD AE 0C            CALL L0038
+1567   0C67 CD AE 0C            CALL L0038	;Output FORMAT mesage
 1568   0C6A D5                  PUSH D
-1569   0C6B 3A 1D 40            LDA 401DH
+1569   0C6B 3A 1D 40            LDA 401DH	;Reads baudrate reg
 1570   0C6E 2F                  CMA
-1571   0C6F E6 0F               ANI 0FH
+1571   0C6F E6 0F               ANI 0FH		;Filters out format parameter
 1572   0C71 07                  RLC
 1573   0C72 07                  RLC
-1574   0C73 21 DB 0D            LXI H,0DDBH
+1574   0C73 21 DB 0D            LXI H,0DDBH	;Start address of the format message pool
 1575   0C76 16 00               MVI D,00H
 1576   0C78 5F                  MOV E,A
-1577   0C79 19                  DAD D
+1577   0C79 19                  DAD D		;Calculates required parameter first address
 1578   0C7A 46                  MOV B,M
-1579   0C7B 23                  INX H
+1579   0C7B 23                  INX H		;First symbol to be displayed
 1580   0C7C D1                  POP D
 1581   0C7D C5                  PUSH B
 1582   0C7E 7E                  MOV A,M
 1583   0C7F F6 80               ORI 80H
-1584   0C81 12                  STAX D
+1584   0C81 12                  STAX D		;First symbol copied to the display
 1585   0C82 23                  INX H
 1586   0C83 13                  INX D
-1587   0C84 3E AD               MVI A,0ADH
+1587   0C84 3E AD               MVI A,0ADH	;Symbol "-"
 1588   0C86 12                  STAX D
 1589   0C87 13                  INX D
 1590   0C88 7E                  MOV A,M
 1591   0C89 F6 80               ORI 80H
-1592   0C8B 12                  STAX D
+1592   0C8B 12                  STAX D		;Second symbol copied to the display
 1593   0C8C 23                  INX H
 1594   0C8D 13                  INX D
-1595   0C8E 3E AD               MVI A,0ADH
+1595   0C8E 3E AD               MVI A,0ADH	;Symbol "-"
 1596   0C90 12                  STAX D
 1597   0C91 13                  INX D
 1598   0C92 7E                  MOV A,M
 1599   0C93 F6 80               ORI 80H
-1600   0C95 12                  STAX D
+1600   0C95 12                  STAX D		;Third symbol copied to the display
 1601   0C96 13                  INX D
-1602   0C97 3E A0               MVI A,0A0H
+1602   0C97 3E A0               MVI A,0A0H	;Trailing space added
 1603   0C99 12                  STAX D
 1604   0C9A 13                  INX D
-1605   0C9B 12                  STAX D
-1606   0C9C 3A 1D 40            LDA 401DH
+1605   0C9B 12                  STAX D		;Trailing space added
+1606   0C9C 3A 1D 40            LDA 401DH	;Reads the baudrate reg
 1607   0C9F 2F                  CMA
-1608   0CA0 E6 F0               ANI 0F0H
+1608   0CA0 E6 F0               ANI 0F0H	;Filters out the baudrate
 1609   0CA2 0F                  RRC
 1610   0CA3 0F                  RRC
-1611   0CA4 21 B3 0D            LXI H,0DB3H
+1611   0CA4 21 B3 0D            LXI H,0DB3H	;Baudrate message pool start
 1612   0CA7 16 00               MVI D,00H
 1613   0CA9 5F                  MOV E,A
 1614   0CAA 19                  DAD D
 1615   0CAB C1                  POP B
-1616   0CAC 4E                  MOV C,M
+1616   0CAC 4E                  MOV C,M		;Reads baudrate setting parameter
 1617   0CAD C9                  RET
 
 										;Function that outputs message located at HL with
