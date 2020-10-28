@@ -47,6 +47,7 @@
 ;		low nibble - format
 
 ;4017,8h - some kind of pointer
+;4020h - 
 ;47A8,9h - some kind of FIFO addresses?
 ;48B2h - 4901h - one row full of 20h, maybe status line?
 	
@@ -62,47 +63,50 @@
 ;What's 48B2? Related to video RAM most likely
 ;around E1B there are patterns for keyboard functionality.
 
-L0120:  MVI A,0FH		;Program start - address 0000h	
-		OUT 40H			;Printer port init?
+;=========================================================================================
 
-0003   0004 21 3D 00            LXI H,003DH
-0004   0007 22 00 40            SHLD 4000H		;?
+ProgStart:  MVI A,0FH		;Program start - address 0000h	
+			OUT 40H			;Printer port init?
 
-		LXI H,1000H
-		MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
-						;If it is, it jumps to the 0x1000 and executes
-						;code located there. Most likely for test
-						;or upgrade purposes.
-		CMP M
-		JZ L0001
+			LXI H,003DH
+			SHLD 4000H		;?
 
-		EI
+			LXI H,1000H
+			MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
+							;If it is, it jumps to the 0x1000 and executes
+							;code located there. Most likely for test
+							;or upgrade purposes.
+			CMP M
+			JZ L0001
+
+			EI
+
+			OUT 0EH			;Outputs WHAT to the 0Eh?
 		
-		OUT 0EH			;Outputs WHAT to the 0Eh?
+			LXI SP,5000H	;SP init
 		
-		LXI SP,5000H	;SP init
-		
-		LXI H,0D9CH
-		LXI D,4002H
-		CALL L0002		;Copies some data from ROM to RAM. What data?
+			LXI H,0D9CH
+			LXI D,4002H
+			CALL L0002		;Copies some data from ROM to RAM. What data?
 	
-						;Inits:
-						;..
-						;..
-						;Checks if serial line is available
-		CALL L0003		;Hardware init?
+							;Inits:
+							;..
+							;..
+							;Checks if serial line is available
+			CALL HwInit		;Hardware init?
 
-						;Constant program loop
-L0006:  CALL L0004		;Serial routine
-		PUSH B
-		CNZ L0005		
-		POP B
-		MOV A,C
-		ANI 7FH
-		STA 4020H
-		JMP L0006		;Constant program loop end
+			;Constant program loop
+			
+ProgLoop:	CALL	L0004			;Serial routine
+			PUSH	B
+			CNZ		L0005		
+			POP		B
+			MOV		A,C
+			ANI		7FH
+			STA		4020H
+			JMP		ProgLoop		;Constant program loop end
 
-		;Is it possible to somehow get in this code?
+		;Is it possible to somehow get there? Seems like INT routine.
 
 0024   0036 FF                  RST 7
 0025   0037 FF                  RST 7
@@ -117,7 +121,7 @@ L0006:  CALL L0004		;Serial routine
 0034   0046 7E                  MOV A,M
 0035   0047 FE 17               CPI 17H
 0036   0049 CA AE 00            JZ L0008
-0037   004C CD D4 08            CALL L0009
+0037   004C CD D4 08            CALL GetRowAddr
 0038   004F 3A 04 40            LDA 4004H
 0039   0052 D3 04       L0013:  OUT 04H
 0040   0054 5E                  MOV E,M
@@ -139,6 +143,8 @@ L0006:  CALL L0004		;Serial routine
 0056   0075 E1                  POP H
 0057   0076 FB                  EI
 0058   0077 C9                  RET
+
+
 0059   0078 36 18       L0014:  MVI M,18H
 0060   007A 3A 09 40            LDA 4009H
 0061   007D E6 02               ANI 02H
@@ -164,7 +170,7 @@ L0006:  CALL L0004		;Serial routine
 0081   00A6 D3 0E               OUT 0EH
 0082   00A8 21 B2 48    L0015:  LXI H,48B2H
 0083   00AB C3 52 00            JMP L0013
-0084   00AE CD D4 08    L0008:  CALL L0009
+0084   00AE CD D4 08    L0008:  CALL GetRowAddr
 0085   00B1 3E 0F               MVI A,0FH
 0086   00B3 C3 52 00            JMP L0013
 0087   00B6 21 1B 40    L0012:  LXI H,401BH
@@ -289,7 +295,7 @@ L0006:  CALL L0004		;Serial routine
 0190   017E C2 B0 01            JNZ L0033
 0191   0181 DB 32               IN 32H
 0192   0183 E6 03               ANI 03H		;0b00000011
-0193   0185 EA C4 01            JPE L0034
+0193   0185 EA C4 01            JPE RetA0
 0194   0188 DB 32               IN 32H
 0195   018A E6 08               ANI 08H		;0b00001000
 0196   018C C8                  RZ
@@ -321,7 +327,7 @@ L0186:  LXI H,48B2H		;Beginning of the status line?
 L0033:  IN 2BH
 		CMA
 		ANI 81H
-		JNZ L0034
+		JNZ RetA0
 		CALL L0035
 		JZ L0036
 0220   01BE 79                  MOV A,C
@@ -330,7 +336,7 @@ L0033:  IN 2BH
 L0036:  ORI 01H		;This function returns with something other than 0 in A
 		RET
 
-L0034:  XRA A		;This function returns with 0 in A
+RetA0:  XRA A		;This function returns with 0 in A
 		RET
 
 											;This is being called from the program loop
@@ -418,7 +424,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0297   025B 32 1A 40            STA 401AH
 0298   025E D3 0F               OUT 0FH
 0299   0260 21 BB 0C            LXI H,0CBBH		;0CBBh - scancode table? Almost sure
-0300   0263 19                  DAD D
+0300   0263 19                  DAD D			;D reg - calculated symbol scancode?
 0301   0264 7E                  MOV A,M
 0302   0265 4F                  MOV C,A
 0303   0266 07                  RLC
@@ -890,7 +896,7 @@ L0042:  LXI H,48B2H	;Status line start address
 		CALL L0038	;Show DATA LINE NOT READY message
 L0044:  LDA 401CH
 		ANI 80H		;Maybe checks ON LINE status?
-		JZ L0120
+		JZ ProgStart	;Jumps to program start - reset
 		MVI A,00H
 		OUT 1BH		;Outputs 00h to 8251 command reg, disables tx, tx, RTS and DTR
 		MVI A,0FH
@@ -900,7 +906,7 @@ L0044:  LDA 401CH
 		XRA A
 		RET
 
-								;Jums here after keyboard initialisation on a condition,
+								;Jumps here after keyboard initialisation on a condition,
 								;seems like hw init continues here.
 
 L0155:  CALL L0121
@@ -985,7 +991,7 @@ L0155:  CALL L0121
 0844   0706 0D          L0132:  DCR C
 0845   0707 F8                  RM
 0846   0708 79                  MOV A,C
-0847   0709 CD D4 08            CALL L0009
+0847   0709 CD D4 08            CALL GetRowAddr
 0848   070C 06 50               MVI B,50H
 0849   070E CD 3F 07            CALL L0131
 0850   0711 D2 06 07            JNC L0132
@@ -1163,7 +1169,7 @@ L0155:  CALL L0121
 1022   0867 46                  MOV B,M
 1023   0868 C5                  PUSH B
 1024   0869 79                  MOV A,C
-1025   086A CD D4 08            CALL L0009
+1025   086A CD D4 08            CALL GetRowAddr
 1026   086D 37                  STC
 1027   086E CD 49 07            CALL L0137
 1028   0871 C1                  POP B
@@ -1214,41 +1220,40 @@ L0155:  CALL L0121
 1073   08CE CD A5 0F            CALL L0050
 1074   08D1 C3 8D 09            JMP L0062
 
-								;What happens here? It doubles the A reg and adds it to the
-								;constant 4902h. In 4902h there is an address of the last
-								;line on the screen. It seems that this function is getting the 
-								;address of requested screen line.
+				;This function is getting the first address of requested screen line.
+				;It takes requested line number from the A and calculates the address
+				;in memory that corresponds to first symbol of this row.
 
-1075   08D4 87          L0009:  ADD A		;A=A*2
-1076   08D5 5F                  MOV E,A
-1077   08D6 16 00               MVI D,00H
-1078   08D8 21 02 49            LXI H,4902H
-1079   08DB 19                  DAD D		;LH=4902h+(2*line number)
-1080   08DC 5E                  MOV E,M
-1081   08DD 23                  INX H
-1082   08DE 56                  MOV D,M
-1083   08DF EB                  XCHG
-1084   08E0 C9                  RET			;Returns with requested line address in HL
+GetRowAddr:		ADD A		;A=A*2
+				MOV E,A
+				MVI D,00H
+				LXI H,4902H
+				DAD D		;LH=4902h+(2*line number)
+				MOV E,M
+				INX H
+				MOV D,M
+				XCHG
+				RET			;Returns with requested line address in HL
 
 											;Hardware init?
-L0003:  MVI A,0A7H	;Set 8251 mode register
-		OUT 1BH
-		MVI A,40H	;Reset 8251
-		OUT 1BH
-		MVI A,7AH	;1 stop bit, even parity, 7bits, 16x clock
-		OUT 1BH
-		MVI A,00H
-		OUT 1BH
+HwInit:  		MVI A,0A7H	;Set 8251 mode register
+				OUT 1BH
+				MVI A,40H	;Reset 8251
+				OUT 1BH
+				MVI A,7AH	;1 stop bit, even parity, 7bits, 16x clock
+				OUT 1BH
+				MVI A,00H
+				OUT 1BH
 
-		CALL L0152	;Sets some kind of status in 4007h and clears a line in 48B2h?
-		CALL L0153	;Initialises row addresses
-		CALL L0076	;Screen wipe, cursor init
-		CALL L0154	;Keyboard or printer init?
+				CALL L0152	;Sets some kind of status in 4007h and clears a line in 48B2h?
+				CALL RowAddrInit	;Initialises row addresses
+				CALL L0076	;Screen wipe, cursor init
+				CALL L0154	;Keyboard or printer init?
 		
-		IN 0FH		;Reads keyboard status?	Or ON LINE status?
-		ANI 01H		
-		RZ
-		JMP L0155	;
+				IN 0FH		;Reads keyboard status?	Or ON LINE status?
+				ANI 01H		
+				RZ
+				JMP L0155	;
 
 1101   0905 2A 02 40    L0069:  LHLD 4002H
 1102   0908 7E          L0157:  MOV A,M
@@ -1265,7 +1270,7 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 1113   091A FA 26 09            JM L0158
 1114   091D D5                  PUSH D
 1115   091E 7B                  MOV A,E
-1116   091F CD D4 08            CALL L0009
+1116   091F CD D4 08            CALL GetRowAddr
 1117   0922 D1                  POP D
 1118   0923 C3 08 09            JMP L0157
 1119   0926 AF          L0158:  XRA A
@@ -1346,7 +1351,7 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 											;the address of the current symbol in memory.
 
 1186   098D 3A 05 40    L0062:  LDA 4005H
-1187   0990 CD D4 08            CALL L0009
+1187   0990 CD D4 08            CALL GetRowAddr
 1188   0993 22 17 40            SHLD 4017H
 1189   0996 3A 06 40            LDA 4006H
 1190   0999 5F                  MOV E,A
@@ -1474,7 +1479,7 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 1310   0A91 C9                  RET
 1311   0A92 3A 05 40    L0083:  LDA 4005H
 1312   0A95 47                  MOV B,A
-1313   0A96 CD D4 08    L0173:  CALL L0009
+1313   0A96 CD D4 08    L0173:  CALL GetRowAddr
 1314   0A99 CD A9 0A            CALL L0172
 1315   0A9C 05                  DCR B
 1316   0A9D F8                  RM
@@ -1531,22 +1536,22 @@ L0003:  MVI A,0A7H	;Set 8251 mode register
 1367   0AE8 C9                  RET
 
 						;This function seems to be initialising the row start addresses
-						;in the end of the RAM ?
+						;in the end of the RAM
 
-L0153:  MVI A,18H		;A=24 (line count)
-		LXI B,0050H		;BC=50 (symbol count)
-		LXI H,4028H		;HL=4028h (video RAM start?)
-		LXI D,4931H		;DE=4931h (video RAM end?)
-L0177:  XCHG
-		MOV M,D			;M=28h ( ( )
-		DCX H
-		MOV M,E			;M=40h ( @ )
-		DCX H
-		XCHG
-		DAD B
-		DCR A			
-		JNZ L0177
-		RET
+RowAddrInit:  		MVI A,18H		;A=24 (line count)
+					LXI B,0050H		;BC=80 (symbol count in line)
+					LXI H,4028H		;HL=4028h (video RAM start?)
+					LXI D,4931H		;DE=4931h (video RAM end?)
+RowAddrInitLoop: 	XCHG
+					MOV M,D			;M=28h ( ( )
+					DCX H
+					MOV M,E			;M=40h ( @ )
+					DCX H
+					XCHG
+					DAD B
+					DCR A			
+					JNZ RowAddrInitLoop
+					RET
 
 1382   0B00 2A 12 40    L0047:  LHLD 4012H
 1383   0B03 2B                  DCX H
@@ -1603,16 +1608,16 @@ L0076:  MVI A,20H
 1429   0B61 CD 2E 06    L0121:  CALL L0182	;Wipes status line
 1430   0B64 3E 27               MVI A,27H	;Enables 8251 tx, rx, RTS and DTR
 1431   0B66 D3 1B               OUT 1BH		;Writes 8251 command
-1432   0B68 CD D7 0F            CALL L0183	;Delay
+1432   0B68 CD D7 0F            CALL DelayHlt	;Delay
 1433   0B6B DB 1B               IN 1BH		;Reads 8251 status
 1434   0B6D E6 80               ANI 80H		;Tests DSR state
 1435   0B6F CA 39 06            JZ L0042	;Jumps to 0042 if DSR inactive
 1436   0B72 3E FF               MVI A,0FFH
 1437   0B74 21 A8 47            LXI H,47A8H	;Address just after the screen end
-1438   0B77 CD 9F 0E            CALL L0184	;Outputs FFh in three consecutive addresses
+1438   0B77 CD 9F 0E            CALL Copy3Bytes	;Outputs FFh in three consecutive addresses
 1439   0B7A 3E 03               MVI A,03H
 1440   0B7C 21 AB 48            LXI H,48ABH
-1441   0B7F CD 9F 0E            CALL L0184	;Outputs 03h in three consecutive addresses
+1441   0B7F CD 9F 0E            CALL Copy3Bytes	;Outputs 03h in three consecutive addresses
 1442   0B82 3E 0F               MVI A,0FH
 1443   0B84 CD 8F 0B            CALL L0065	;Clears four LSB in 4007h?
 1444   0B87 3C                  INR A
@@ -1662,7 +1667,7 @@ L0187:  MOV A,C			;Seems like this is the control sequence of the keyboard
 		OUT 2BH
 		MVI A,27H		;00100111
 		OUT 2BH
-		CALL L0183		;delay
+		CALL DelayHlt		;delay
 		IN 2BH			;Reads data from the keyboard
 		ANI 80H			;Tests MSB
 		JZ L0186		;If MSB=0 then goes to L0186. Or else returns.
@@ -1671,7 +1676,7 @@ L0187:  MOV A,C			;Seems like this is the control sequence of the keyboard
 L0185:  MVI B,7AH
 		JMP L0187
 
-1487   0BD0 CD E9 0A    L0147:  CALL L0153
+1487   0BD0 CD E9 0A    L0147:  CALL RowAddrInit
 1488   0BD3 21 28 40            LXI H,4028H
 1489   0BD6 CD F5 0B            CALL L0188
 1490   0BD9 3E A0               MVI A,0A0H
@@ -2240,7 +2245,7 @@ L0185:  MVI B,7AH
 
 								;Outputs A in three consecutive memory locations
 
-L0184:  MOV M,A
+Copy3Bytes:  MOV M,A
 		INX H
 		MOV M,A
 		INX H
@@ -2482,14 +2487,14 @@ L0050:  STAX D		;Saves code from A into the memory
 2263   0FD3 C2 CF 0F            JNZ L0211
 2264   0FD6 C9                  RET
 
-								;This is called from the keyboard function
-								;Seems like some kind of delay that loops for
-								;FAh times with HLT instruction
-L0183:  MVI A,0FAH
-L0212:  HLT
-		DCR A
-		JNZ L0212
-		RET
+				;Delay that loops for FAh times with HLT instruction used as a delay
+				;element. Timer interrupt is waking up the CPU from the HALT state
+				
+DelayHlt:  		MVI	A,0FAH
+DelayHltLoop:	HLT
+				DCR	A
+				JNZ	DelayHltLoop
+				RET
 
 
 					;This function reads data from the ROM and copies it to the RAM
@@ -2530,15 +2535,15 @@ LIST OF LABELS
 Sorted by address:      Sorted by name:
 ---------------------------------------------
 
-L0120:  0000            L0001:  1000
-L0006:  0025            L0002:  0FDF
-L0013:  0052            L0003:  08E1
+ProgStart:  0000            L0001:  1000
+ProgLoop:  0025            L0002:  0FDF
+L0013:  0052            HwInit:  08E1
 L0010:  0067            L0004:  01C6
 L0014:  0078            L0005:  0275
-L0007:  0099            L0006:  0025
+L0007:  0099            ProgLoop:  0025
 L0015:  00A8            L0007:  0099
 L0008:  00AE            L0008:  00AE
-L0012:  00B6            L0009:  08D4
+L0012:  00B6            GetRowAddr:  08D4
 L0016:  00D5            L0010:  0067
 L0017:  00D8            L0011:  00DB
 L0011:  00DB            L0012:  00B6
@@ -2557,13 +2562,13 @@ L0037:  019C            L0024:  0EA5
 L0186:  01A1            L0025:  0EB8
 L0033:  01B0            L0026:  0163
 L0036:  01C1            L0027:  0C60
-L0034:  01C4            L0028:  014A
+RetA0:  01C4            L0028:  014A
 L0004:  01C6            L0029:  0160
 L0040:  01E3            L0030:  0C15
 L0041:  01F3            L0031:  013E
 L0043:  01F8            L0032:  0B9C
 L0039:  021F            L0033:  01B0
-L0048:  0239            L0034:  01C4
+L0048:  0239            RetA0:  01C4
 L0005:  0275            L0035:  0F2F
 L0052:  0284            L0036:  01C1
 L0059:  02A9            L0037:  019C
@@ -2645,11 +2650,11 @@ L0146:  0855            L0112:  058A
 L0053:  087D            L0113:  05DB
 L0149:  0890            L0114:  05B8
 L0064:  089C            L0115:  057B
-L0009:  08D4            L0116:  0343
-L0003:  08E1            L0117:  0582
+GetRowAddr:  08D4            L0116:  0343
+HwInit:  08E1            L0117:  0582
 L0069:  0905            L0118:  05FC
 L0157:  0908            L0119:  061E
-L0158:  0926            L0120:  0000
+L0158:  0926            ProgStart:  0000
 L0156:  0928            L0121:  0B61
 L0091:  092B            L0122:  06A9
 L0092:  0936            L0123:  067F
@@ -2682,8 +2687,8 @@ L0176:  0AC4            L0149:  0890
 L0175:  0ACF            L0150:  09AB
 L0167:  0AD3            L0151:  06EB
 L0170:  0AE1            L0152:  0629
-L0153:  0AE9            L0153:  0AE9
-L0177:  0AF4            L0154:  0169
+RowAddrInit:  0AE9            RowAddrInit:  0AE9
+RowAddrInitLoop:  0AF4            L0154:  0169
 L0047:  0B00            L0155:  0660
 L0178:  0B1A            L0156:  0928
 L0180:  0B23            L0157:  0908
@@ -2706,14 +2711,14 @@ L0193:  0BF9            L0173:  0A96
 L0190:  0C00            L0174:  09AE
 L0030:  0C15            L0175:  0ACF
 L0196:  0C43            L0176:  0AC4
-L0194:  0C56            L0177:  0AF4
+L0194:  0C56            RowAddrInitLoop:  0AF4
 L0027:  0C60            L0178:  0B1A
 L0038:  0CAE            L0179:  0B44
 L0195:  0CB0            L0180:  0B23
-L0184:  0E9F            L0181:  0B41
+Copy3Bytes:  0E9F            L0181:  0B41
 L0024:  0EA5            L0182:  062E
-L0025:  0EB8            L0183:  0FD7
-L0111:  0ECC            L0184:  0E9F
+L0025:  0EB8            DelayHlt:  0FD7
+L0111:  0ECC            Copy3Bytes:  0E9F
 L0204:  0ECD            L0185:  0BCB
 L0200:  0EF6            L0186:  01A1
 L0107:  0EFF            L0187:  0BAE
@@ -2737,9 +2742,9 @@ L0199:  0FBD            L0204:  0ECD
 L0051:  0FC3            L0205:  0F18
 L0056:  0FCD            L0206:  0F05
 L0211:  0FCF            L0207:  0F1E
-L0183:  0FD7            L0208:  0F56
-L0212:  0FD9            L0209:  0F5A
+DelayHlt:  0FD7            L0208:  0F56
+DelayHltLoop:  0FD9            L0209:  0F5A
 L0002:  0FDF            L0210:  0F8D
 L0213:  0FE1            L0211:  0FCF
-L0001:  1000            L0212:  0FD9
+L0001:  1000            DelayHltLoop:  0FD9
 L0197:  EE02            L0213:  0FE1
