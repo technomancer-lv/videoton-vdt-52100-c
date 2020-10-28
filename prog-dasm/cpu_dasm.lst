@@ -3,6 +3,7 @@
 ;--------------------------------------------------
 
 ;Peripherials:
+;04h - 
 ;0Ch - 
 ;0Eh -
 ;0Fh - keyboard related, input
@@ -15,6 +16,7 @@
 ;30h - 
 ;32h - 
 ;40h - possibly a printer port?
+;80h - 
 
 ;Interrupts
 ;Seems like interrupts are used to get CPU out of the HALT state, so most likely
@@ -23,13 +25,14 @@
 ;Addressing:
 ;0000h - 0FFFh - main ROM
 ;1000h - ????h - additional ROM
-;4000h - 5000h - RAM?
+;4000h - 5000h - RAM
 
 ;Control regiters:
+;4000,1h - initialised with 003Dh? An address that is used for a loop at one point.
 ;4002,3h - seems like current symbol address in memory, cursor position
 ;4005h - current line number?
 ;4006h - current symbol number in line?
-;4007h - 
+;4007h - seems like program status register
 ;	0 - something on-line related
 ;	1
 ;	2 - ?
@@ -38,8 +41,9 @@
 ;	5
 ;	6
 ;	7 - something on-line related, RTS is set depending on this
-
+;4009h - 02 something related to baudrate change
 ;400Ah - 
+;400E,F,10,11h - something related to received symbols? Pointers?
 ;401Ch - maybe this stores ON LINE status?
 ;401Dh - baud rate and format register
 ;		high nibble - baudrate
@@ -49,27 +53,23 @@
 ;4017,8h - some kind of pointer
 ;4020h - 
 ;47A8,9h - some kind of FIFO addresses?
-;48B2h - 4901h - one row full of 20h, maybe status line?
+;48B2h - 4901h - one row, status line
 	
 ;Video line structure in memory:
 ;..
 
 ;NOTES
-;4000h, 5000h - definitely RAM, possible that 5000h is the end as it's initialised as a SP
 ;Beginning of the RAM are some kind of status registers.
-;4000h is initialised with 003Dh at the very beginning of the firmware. Why?
-;What's at 1000h? Seems like additional or test ROM.
-;0x1B seems to be 8251 becaue init sequence seems correct
-;What's 48B2? Related to video RAM most likely
 ;around E1B there are patterns for keyboard functionality.
 
 ;=========================================================================================
 
 ProgStart:  MVI A,0FH		;Program start - address 0000h	
-			OUT 40H			;Printer port init?
+			OUT 40H			;Printer port init? Or something video related?
 
 			LXI H,003DH
-			SHLD 4000H		;?
+			SHLD 4000H		;?	Saves an address in the very first address of the RAM
+							;But why? At some point it jumps to that address.
 
 			LXI H,1000H
 			MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
@@ -77,9 +77,9 @@ ProgStart:  MVI A,0FH		;Program start - address 0000h
 							;code located there. Most likely for test
 							;or upgrade purposes.
 			CMP M
-			JZ L0001
+			JZ UpgradeRomAddr	;Jumps to 1000h
 
-			EI
+			EI				;Enable interrupt (timer? video pulses?)
 
 			OUT 0EH			;Outputs WHAT to the 0Eh?
 		
@@ -106,13 +106,14 @@ ProgLoop:	CALL	L0004			;Serial routine
 			STA		4020H
 			JMP		ProgLoop		;Constant program loop end
 
-		;Is it possible to somehow get there? Seems like INT routine.
+				;Is it possible to somehow get there? Seems like INT routine.
 
-0024   0036 FF                  RST 7
-0025   0037 FF                  RST 7
-		PUSH H
+				RST 7
+				RST 7
+				PUSH H
 0027   0039 2A 00 40            LHLD 4000H
 0028   003C E9                  PCHL
+
 0029   003D F5                  PUSH PSW
 		PUSH D
 0031   003F 21 08 40            LXI H,4008H
@@ -387,7 +388,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 		JMP L0044	;Checks DSR and ON LINE status and returns
 
 0266   021F C5          L0039:  PUSH B
-0267   0220 CD 7A 01            CALL L0045
+0267   0220 CD 7A 01            CALL L0045		;This might be the keyboard function
 0268   0223 3A 1C 40            LDA 401CH
 0269   0226 E6 20               ANI 20H
 0270   0228 CC 21 08            CZ L0046
@@ -395,7 +396,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0272   022E C1                  POP B
 0273   022F 3A 09 40            LDA 4009H
 0274   0232 E6 02               ANI 02H
-0275   0234 CA 39 02            JZ L0048
+0275   0234 CA 39 02            JZ L0048		;Jumps to baudrate display and change
 0276   0237 AF                  XRA A
 0277   0238 C9                  RET
 
@@ -431,7 +432,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0304   0267 07                  RLC
 0305   0268 07                  RLC
 0306   0269 E6 07               ANI 07H
-0307   026B 21 2D 0D            LXI H,0D2DH		;Another table?
+0307   026B 21 2D 0D            LXI H,0D2DH		;Another table? Address table?
 0308   026E CD C3 0F            CALL L0051
 0309   0271 4F                  MOV C,A
 0310   0272 F6 01               ORI 01H
@@ -449,13 +450,15 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0318   0284 79          L0052:  MOV A,C
 0319   0285 E6 7F               ANI 7FH
 0320   0287 21 47 0D            LXI H,0D47H
-0321   028A CD CD 0F            CALL L0056
-0322   028D 78                  MOV A,B
-0323   028E 21 64 0D            LXI H,0D64H
-0324   0291 C3 C3 0F            JMP L0051
-0325   0294 79                  MOV A,C
+0321   028A CD CD 0F            CALL L0056		;Searches for a pattern in the memory
+0322   028D 78                  MOV A,B			;After that, it uses found number of the 
+												;pattern to calculate where to jump next.
+0323   028E 21 64 0D            LXI H,0D64H		;Address table?
+0324   0291 C3 C3 0F            JMP L0051		;
+
+0325   0294 79                  MOV A,C			;Can jump here using L0051
 0326   0295 C9                  RET
-0327   0296 78                  MOV A,B
+0327   0296 78                  MOV A,B			;Can jump here using L0051
 0328   0297 07                  RLC
 0329   0298 79                  MOV A,C
 0330   0299 D8                  RC
@@ -485,7 +488,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0354   02C2 C3 B2 02            JMP L0058
 0355   02C5 79                  MOV A,C
 0356   02C6 E6 1F               ANI 1FH
-0357   02C8 21 39 0D            LXI H,0D39H
+0357   02C8 21 39 0D            LXI H,0D39H		;Address table?
 0358   02CB CD C3 0F            CALL L0051
 0359   02CE F1                  POP PSW
 0360   02CF AF                  XRA A
@@ -612,7 +615,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0477   03D2 CD 82 09            CALL L0078
 0478   03D5 EB                  XCHG
 0479   03D6 2A 02 40            LHLD 4002H
-0480   03D9 CD B7 0F            CALL L0079
+0480   03D9 CD B7 0F            CALL CmpRegHlDe
 0481   03DC D2 F1 03            JNC L0080
 0482   03DF CD 28 04    L0085:  CALL L0081
 0483   03E2 CD 5C 09            CALL L0082
@@ -664,7 +667,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0529   043A CD 82 09            CALL L0078
 0530   043D EB                  XCHG
 0531   043E 2A 02 40            LHLD 4002H
-0532   0441 CD B7 0F            CALL L0079
+0532   0441 CD B7 0F            CALL CmpRegHlDe
 0533   0444 D2 75 04            JNC L0090
 0534   0447 EB                  XCHG
 0535   0448 CD B0 0F            CALL L0088
@@ -720,7 +723,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0585   04B1 CD 82 09    L0094:  CALL L0078
 0586   04B4 EB                  XCHG
 0587   04B5 2A 17 40            LHLD 4017H
-0588   04B8 CD B7 0F            CALL L0079
+0588   04B8 CD B7 0F            CALL CmpRegHlDe
 0589   04BB D2 CC 04            JNC L0095
 0590   04BE CD F8 04            CALL L0096
 0591   04C1 21 50 00    L0100:  LXI H,0050H
@@ -735,7 +738,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0600   04DB 2A 21 40            LHLD 4021H
 0601   04DE 50                  MOV D,B
 0602   04DF 59                  MOV E,C
-0603   04E0 CD B7 0F            CALL L0079
+0603   04E0 CD B7 0F            CALL CmpRegHlDe
 0604   04E3 CA F2 04            JZ L0099
 0605   04E6 CD B0 0F            CALL L0088
 0606   04E9 11 28 40            LXI D,4028H
@@ -765,7 +768,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0630   0518 CD 82 09    L0101:  CALL L0078
 0631   051B EB                  XCHG
 0632   051C 2A 17 40            LHLD 4017H
-0633   051F CD B7 0F            CALL L0079
+0633   051F CD B7 0F            CALL CmpRegHlDe
 0634   0522 D2 2B 05            JNC L0102
 0635   0525 CD 52 05            CALL L0103
 0636   0528 C3 43 05            JMP L0104
@@ -877,7 +880,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0742   0623 C2 E6 05            JNZ L0109
 0743   0626 C3 B8 05            JMP L0114
 
-L0152:  MVI A,20H	;Clears bit 5 in 4007
+L0152:  MVI A,20H	;Clears bit 5 in 4007	;Can jump here using L0051
 		CALL L0065
 L0182:  LXI D,48B2H
 		LXI H,0050H
@@ -894,7 +897,8 @@ L0042:  LXI H,48B2H	;Status line start address
 		XCHG
 		LXI H,0E39H	;Start address of the DATA LINE NOT READY message
 		CALL L0038	;Show DATA LINE NOT READY message
-L0044:  LDA 401CH
+		
+L0044:  LDA 401CH			;Can jump here using L0051
 		ANI 80H		;Maybe checks ON LINE status?
 		JZ ProgStart	;Jumps to program start - reset
 		MVI A,00H
@@ -909,14 +913,14 @@ L0044:  LDA 401CH
 								;Jumps here after keyboard initialisation on a condition,
 								;seems like hw init continues here.
 
-L0155:  CALL L0121
+L0155:  CALL L0121		;Can jump here using L0051
 												;Returns with modified 4007h here
 												;Or with 0 if data line is not ready
 		RZ				;Returns if DSR not ready
 		MVI A,81H		;Sets 4007 status bits if line ready
 		JMP L0021		
 
-0772   0669 3A 07 40            LDA 4007H
+0772   0669 3A 07 40            LDA 4007H	;Can jump here using L0051
 0773   066C E6 02               ANI 02H
 0774   066E C8                  RZ
 0775   066F CD 61 0B            CALL L0121
@@ -964,12 +968,13 @@ L0155:  CALL L0121
 0817   06CC CD 8F 0B            CALL L0065
 0818   06CF C3 43 03            JMP L0116
 0819   06D2 E9          L0127:  PCHL
-0820   06D3 3E 80               MVI A,80H
+0820   06D3 3E 80               MVI A,80H		;Can jump here using L0051
 0821   06D5 CD 96 0B            CALL L0128
 0822   06D8 E6 01               ANI 01H
 0823   06DA C8                  RZ
 0824   06DB C3 54 01            JMP L0022
-0825   06DE 3E 10               MVI A,10H
+
+0825   06DE 3E 10               MVI A,10H	;Can jump here using L0051
 0826   06E0 CD 96 0B            CALL L0128
 0827   06E3 21 09 40            LXI H,4009H
 0828   06E6 7E                  MOV A,M
@@ -977,7 +982,7 @@ L0155:  CALL L0121
 0830   06E9 77                  MOV M,A
 0831   06EA C9                  RET
 0832   06EB CD 17 03    L0151:  CALL L0063
-0833   06EE 3E 40               MVI A,40H
+0833   06EE 3E 40               MVI A,40H		;Can jump here using L0051
 0834   06F0 C3 96 0B            JMP L0128
 0835   06F3 C3 87 07            JMP L0129
 0836   06F6 C9                  RET
@@ -1122,7 +1127,10 @@ L0155:  CALL L0121
 0975   080A F1                  POP PSW
 0976   080B 3E 04               MVI A,04H
 0977   080D C3 8F 0B            JMP L0065
-0978   0810 79          L0145:  MOV A,C
+
+											;This part checks if C is 0Ah, 0Ch, or 0Dh.
+											;Most likely these checks are for CR, LF and FF.
+0978   0810 79          L0145:  MOV A,C	
 0979   0811 FE 0A               CPI 0AH
 0980   0813 CA CC 0E            JZ L0111
 0981   0816 FE 0C               CPI 0CH
@@ -1130,6 +1138,7 @@ L0155:  CALL L0121
 0983   081B FE 0D               CPI 0DH
 0984   081D CA CC 0E            JZ L0111
 0985   0820 C9                  RET
+
 0986   0821 3A 09 40    L0046:  LDA 4009H
 0987   0824 E6 02               ANI 02H
 0988   0826 C2 55 08            JNZ L0146
@@ -1139,22 +1148,33 @@ L0155:  CALL L0121
 0992   0831 3A 07 40            LDA 4007H
 0993   0834 E6 01               ANI 01H
 0994   0836 C8                  RZ
+
+											;Seems like it comes here when BREAK condition is needed.
 0995   0837 3E 2E               MVI A,2EH
-0996   0839 D3 1B               OUT 1BH		;Serial
+0996   0839 D3 1B               OUT 1BH		;Turns on BREAK condition in 8251
 0997   083B 21 1C 40            LXI H,401CH
-0998   083E 7E          L0148:  MOV A,M
+
+								;Loop waiting for 401Ch bit 5 turn to one. Seems like timer
+								;for BREAK condition duration.
+
+0998   083E 7E          L0148:  MOV A,M		
 0999   083F E6 20               ANI 20H
 1000   0841 CA 3E 08            JZ L0148
+
 1001   0844 3E 27               MVI A,27H
-1002   0846 D3 1B               OUT 1BH		;Serial
+1002   0846 D3 1B               OUT 1BH		;Returns 8251 to normal mode
+
 1003   0848 97                  SUB A
 1004   0849 32 0A 40            STA 400AH
 1005   084C C9                  RET
+
+
 1006   084D 21 09 40            LXI H,4009H
 1007   0850 3E 02               MVI A,02H
 1008   0852 B6                  ORA M
 1009   0853 77                  MOV M,A
 1010   0854 C9                  RET
+
 1011   0855 21 09 40    L0146:  LXI H,4009H
 1012   0858 3E 02               MVI A,02H
 1013   085A 2F                  CMA
@@ -1538,19 +1558,19 @@ HwInit:  		MVI A,0A7H	;Set 8251 mode register
 						;This function seems to be initialising the row start addresses
 						;in the end of the RAM
 
-RowAddrInit:  		MVI A,18H		;A=24 (line count)
-					LXI B,0050H		;BC=80 (symbol count in line)
-					LXI H,4028H		;HL=4028h (video RAM start?)
-					LXI D,4931H		;DE=4931h (video RAM end?)
+RowAddrInit:  		MVI 	A,18H		;A=24 (line count)
+					LXI 	B,0050H		;BC=80 (symbol count in line)
+					LXI 	H,4028H		;HL=4028h (video RAM start?)
+					LXI 	D,4931H		;DE=4931h (RAM area where address will be stored)
 RowAddrInitLoop: 	XCHG
-					MOV M,D			;M=28h ( ( )
-					DCX H
-					MOV M,E			;M=40h ( @ )
-					DCX H
+					MOV 	M,D			
+					DCX 	H
+					MOV 	M,E			
+					DCX 	H
 					XCHG
-					DAD B
-					DCR A			
-					JNZ RowAddrInitLoop
+					DAD 	B
+					DCR 	A			
+					JNZ 	RowAddrInitLoop
 					RET
 
 1382   0B00 2A 12 40    L0047:  LHLD 4012H
@@ -1936,102 +1956,30 @@ L0185:  MVI B,7AH
 1726   0D2A 00                  NOP
 1727   0D2B 00                  NOP
 1728   0D2C 0D                  DCR C
-1729   0D2D 94                  SUB H
-1730   0D2E 02                  STAX B
-1731   0D2F 96                  SUB M
-1732   0D30 02                  STAX B
-1733   0D31 A1                  ANA C
-1734   0D32 02                  STAX B
-1735   0D33 A9                  XRA C
-1736   0D34 02                  STAX B
-1737   0D35 C5                  PUSH B
-1738   0D36 02                  STAX B
-1739   0D37 D1                  POP D
-1740   0D38 02                  STAX B
-1741   0D39 DE 06               SBI 06H
-1742   0D3B 48                  MOV C,B
-1743   0D3C 06 60               MVI B,60H
-1744   0D3E 06 69               MVI B,69H
-1745   0D40 06 29               MVI B,29H
-1746   0D42 06 EE               MVI B,0EEH
-1747   0D44 06 D3               MVI B,0D3H
-1748   0D46 06 1B               MVI B,1BH
-1749   0D48 07                  RLC
-1750   0D49 17                  RAL
-1751   0D4A 0B                  DCX B
-1752   0D4B 1E 1C               MVI E,1CH
-1753   0D4D 1D                  DCR E
-1754   0D4E 1F                  RAR
-1755   0D4F 09                  DAD B
-1756   0D50 0A                  LDAX B
-1757   0D51 0C                  INR C
-1758   0D52 19                  DAD D
-1759   0D53 1A                  LDAX D
-1760   0D54 18                  UNRECOGNIZED
-1761   0D55 08                  UNRECOGNIZED
-1762   0D56 00                  NOP
-1763   0D57 01 0D 04            LXI B,040DH
-1764   0D5A 0E 0F               MVI C,0FH
-1765   0D5C 10                  UNRECOGNIZED
-1766   0D5D 11 15 13            LXI D,1315H
-1767   0D60 14                  INR D
-1768   0D61 1B                  DCX D
-1769   0D62 16 1B               MVI D,1BH
-1770   0D64 7B                  MOV A,E
-1771   0D65 02                  STAX B
-1772   0D66 62                  MOV H,D
-1773   0D67 08                  UNRECOGNIZED
-1774   0D68 9D                  SBB L
-1775   0D69 06 55               MVI B,55H
-1776   0D6B 08                  UNRECOGNIZED
-1777   0D6C 4D                  MOV C,L
-1778   0D6D 08                  UNRECOGNIZED
-1779   0D6E 1B                  DCX D
-1780   0D6F 07                  RLC
-1781   0D70 B8                  CMP B
-1782   0D71 07                  RLC
-1783   0D72 F3                  DI
-1784   0D73 06 AA               MVI B,0AAH
-1785   0D75 07                  RLC
-1786   0D76 9D                  SBB L
-1787   0D77 07                  RLC
-1788   0D78 FF                  RST 7
-1789   0D79 06 30               MVI B,30H
-1790   0D7B 03                  INX B
-1791   0D7C 5A                  MOV E,D
-1792   0D7D 07                  RLC
-1793   0D7E F6 06               ORI 06H
-1794   0D80 DA 02 EE            JC L0197
-1795   0D83 02                  STAX B
-1796   0D84 00                  NOP
-1797   0D85 03                  INX B
-1798   0D86 21 03 37            LXI H,3703H
-1799   0D89 03                  INX B
-1800   0D8A 43                  MOV B,E
-1801   0D8B 03                  INX B
-1802   0D8C 4A                  MOV C,D
-1803   0D8D 03                  INX B
-1804   0D8E 9B                  SBB E
-1805   0D8F 03                  INX B
-1806   0D90 CB                  UNRECOGNIZED
-1807   0D91 03                  INX B
-1808   0D92 33                  INX SP
-1809   0D93 04                  INR B
-1810   0D94 A0                  ANA B
-1811   0D95 04                  INR B
-1812   0D96 07                  RLC
-1813   0D97 05                  DCR B
-1814   0D98 67                  MOV H,A
-1815   0D99 05                  DCR B
-1816   0D9A F7                  RST 6
-1817   0D9B 06 15               MVI B,15H
-1818   0D9D 28                  UNRECOGNIZED
-1819   0D9E 40                  MOV B,B
-1820   0D9F 0B                  DCX B
-1821   0DA0 17                  RAL
-1822   0DA1 00                  NOP
-1823   0DA2 02                  STAX B
-1824   0DA3 18                  UNRECOGNIZED
+
+				;DATA pattern start
+				;There are some jump addresses
+				DW	0294h,0296h,02A1h,02A9h,02C5h,02D1h
+
+				;DATA field, addresses
+				DW	06DEh,0648h,0660h,0669h,0629h,06EEh,06D3h
+
+				;DATA? Might be some kind of a pattern for 1Bh count of symbols
+
+				DB	1Bh,07h,17h,0Bh,1Eh,1Ch,1Dh,1Fh
+				DB	09h,0Ah,0Ch,19h,1Ah,18h,08h,00h
+				DB	01h,0Dh,04h,0Eh,0Fh,10h,11h,15h
+				DB	13h,14h,1Bh,16h,1Bh
+				
+				;DATA pattern start
+				;There are some jump addresses
+				DW	027Bh,0862h,069Dh,0855h,084Dh,071Bh,07B8h,06F3h
+				DW	07AAh,079Dh,06FFh,0330h,075Ah,06F6h,02DAh,02EEh
+				DW	0300h,0321h,0337h,0343h,034Ah,039Bh,03CBh,0433h
+				DW	04A0h,0507h,0567h,06F7h,2815h,0B40h,0017h,1802h
+
+										;DATA pattern end?
+
 1825   0DA4 00                  NOP
 1826   0DA5 00                  NOP
 1827   0DA6 00                  NOP
@@ -2243,14 +2191,16 @@ L0185:  MVI B,7AH
 2033   0E9D 20                  RIM
 2034   0E9E 20                  RIM
 
+										;DATA end
+
 								;Outputs A in three consecutive memory locations
 
-Copy3Bytes:  MOV M,A
-		INX H
-		MOV M,A
-		INX H
-		MOV M,A
-		RET
+Copy3Bytes:		MOV		M,A
+				INX		H
+				MOV		M,A
+				INX		H
+				MOV		M,A
+				RET
 
 2041   0EA5 7E          L0024:  MOV A,M
 2042   0EA6 23                  INX H
@@ -2291,18 +2241,24 @@ Copy3Bytes:  MOV M,A
 2075   0EC9 F6 01               ORI 01H
 2076   0ECB C9                  RET			;Returns?
 
+											;Jumps here in case if received CR, LF or FF code.
+
 2077   0ECC C5          L0111:  PUSH B
 2078   0ECD 21 0E 40    L0204:  LXI H,400EH
-2079   0ED0 56                  MOV D,M
+2079   0ED0 56                  MOV D,M		;In DE and BC reads two pointers from RAM
 2080   0ED1 23                  INX H
 2081   0ED2 5E                  MOV E,M
 2082   0ED3 23                  INX H
 2083   0ED4 46                  MOV B,M
 2084   0ED5 23                  INX H
 2085   0ED6 4E                  MOV C,M
-2086   0ED7 CD 7B 0F            CALL L0198
-2087   0EDA CD BD 0F            CALL L0199
-2088   0EDD CA F6 0E            JZ L0200
+
+2086   0ED7 CD 7B 0F            CALL L0198	;Increases D and E in some strange way. Possibly
+											;calculates some kind of pointer to the ROM.
+2087   0EDA CD BD 0F            CALL CmpRegBcDe	;Compares BC with DE
+2088   0EDD CA F6 0E            JZ L0200	;If equal, jumps to L0200
+											;Else
+
 2089   0EE0 21 0E 40            LXI H,400EH
 2090   0EE3 CD 68 0F            CALL L0201
 2091   0EE6 F1                  POP PSW
@@ -2317,11 +2273,13 @@ Copy3Bytes:  MOV M,A
 2100   0EF3 B1                  ORA C
 2101   0EF4 77                  MOV M,A
 2102   0EF5 C9                  RET
+
 2103   0EF6 F1          L0200:  POP PSW
 2104   0EF7 CD 02 0F            CALL L0203
 2105   0EFA C2 CD 0E            JNZ L0204
 2106   0EFD F1                  POP PSW
 2107   0EFE C9                  RET
+
 2108   0EFF CD 2E 06    L0107:  CALL L0182
 2109   0F02 26 2F       L0203:  MVI H,2FH
 2110   0F04 6C                  MOV L,H
@@ -2363,7 +2321,7 @@ Copy3Bytes:  MOV M,A
 2143   0F36 56                  MOV D,M
 2144   0F37 23                  INX H
 2145   0F38 5E                  MOV E,M
-2146   0F39 CD BD 0F            CALL L0199
+2146   0F39 CD BD 0F            CALL CmpRegBcDe
 2147   0F3C C8                  RZ
 2148   0F3D CD 7B 0F            CALL L0198
 2149   0F40 21 10 40            LXI H,4010H
@@ -2391,6 +2349,7 @@ Copy3Bytes:  MOV M,A
 2171   0F62 C2 5A 0F            JNZ L0209
 2172   0F65 F6 01               ORI 01H
 2173   0F67 C9                  RET
+
 2174   0F68 72          L0201:  MOV M,D
 2175   0F69 23                  INX H
 2176   0F6A 73                  MOV M,E
@@ -2405,15 +2364,16 @@ Copy3Bytes:  MOV M,A
 2185   0F76 11 32 49            LXI D,4932H
 2186   0F79 19                  DAD D
 2187   0F7A C9                  RET
+
 2188   0F7B 7B          L0198:  MOV A,E
 2189   0F7C 3C                  INR A
 2190   0F7D E6 07               ANI 07H
-2191   0F7F 5F                  MOV E,A
+2191   0F7F 5F                  MOV E,A		;Increases E, but leaves only three LSB
 2192   0F80 E1                  POP H
 2193   0F81 F5                  PUSH PSW
 2194   0F82 E5                  PUSH H
 2195   0F83 C0                  RNZ
-2196   0F84 7A                  MOV A,D
+2196   0F84 7A                  MOV A,D		;If E overflows to 4. bit, increases D
 2197   0F85 3C                  INR A
 2198   0F86 FE F3               CPI 0F3H
 2199   0F88 CC 8D 0F            CZ L0210
@@ -2421,6 +2381,7 @@ Copy3Bytes:  MOV M,A
 2201   0F8C C9                  RET
 2202   0F8D AF          L0210:  XRA A
 2203   0F8E C9                  RET
+
 2204   0F8F 7D          L0105:  MOV A,L
 2205   0F90 B4                  ORA H
 2206   0F91 C8                  RZ
@@ -2457,18 +2418,27 @@ L0050:  STAX D		;Saves code from A into the memory
 2233   0FB4 9A                  SBB D
 2234   0FB5 67                  MOV H,A
 2235   0FB6 C9                  RET
-2236   0FB7 7C          L0079:  MOV A,H
+
+										;Function calculates HL with DE and returns with
+										;0 in A if equal.
+2236   0FB7 7C          CmpRegHlDe:  MOV A,H
 2237   0FB8 BA                  CMP D
 2238   0FB9 C0                  RNZ
 2239   0FBA 7D                  MOV A,L
 2240   0FBB BB                  CMP E
 2241   0FBC C9                  RET
-2242   0FBD 78          L0199:  MOV A,B
+
+										;Function calculates BC with DE and returns with
+										;0 in A if equal.
+2242   0FBD 78          CmpRegHlDegBcDe:  MOV A,B
 2243   0FBE BA                  CMP D
 2244   0FBF C0                  RNZ
 2245   0FC0 79                  MOV A,C
 2246   0FC1 BB                  CMP E
 2247   0FC2 C9                  RET
+
+										;Doubles the A, adds to HL, reads data form HL location and jumps to
+										;address that is read from the ROM
 2248   0FC3 87          L0051:  ADD A
 2249   0FC4 16 00               MVI D,00H
 2250   0FC6 5F                  MOV E,A
@@ -2478,6 +2448,9 @@ L0050:  STAX D		;Saves code from A into the memory
 2254   0FCA 56                  MOV D,M
 2255   0FCB EB                  XCHG
 2256   0FCC E9                  PCHL
+
+										;Searches for A contents in memory for B times.
+										;B is read from the memory at first.
 2257   0FCD 46          L0056:  MOV B,M
 2258   0FCE 23                  INX H
 2259   0FCF BE          L0211:  CMP M
@@ -2535,7 +2508,7 @@ LIST OF LABELS
 Sorted by address:      Sorted by name:
 ---------------------------------------------
 
-ProgStart:  0000            L0001:  1000
+ProgStart:  0000            UpgradeRomAddr:  1000
 ProgLoop:  0025            L0002:  0FDF
 L0013:  0052            HwInit:  08E1
 L0010:  0067            L0004:  01C6
@@ -2613,7 +2586,7 @@ L0108:  05BD            L0075:  03A8
 L0110:  05D0            L0076:  0B53
 L0113:  05DB            L0077:  040F
 L0109:  05E6            L0078:  0982
-L0118:  05FC            L0079:  0FB7
+L0118:  05FC            CmpRegHlDe:  0FB7
 L0119:  061E            L0080:  03F1
 L0152:  0629            L0081:  0428
 L0182:  062E            L0082:  095C
@@ -2733,12 +2706,12 @@ L0209:  0F5A            L0195:  0CB0
 L0201:  0F68            L0196:  0C43
 L0198:  0F7B            L0197:  EE02
 L0210:  0F8D            L0198:  0F7B
-L0105:  0F8F            L0199:  0FBD
+L0105:  0F8F            CmpRegBcDe:  0FBD
 L0098:  0F9A            L0200:  0EF6
 L0050:  0FA5            L0201:  0F68
 L0088:  0FB0            L0202:  0F1A
-L0079:  0FB7            L0203:  0F02
-L0199:  0FBD            L0204:  0ECD
+CmpRegHlDe:  0FB7            L0203:  0F02
+CmpRegBcDe:  0FBD            L0204:  0ECD
 L0051:  0FC3            L0205:  0F18
 L0056:  0FCD            L0206:  0F05
 L0211:  0FCF            L0207:  0F1E
@@ -2746,5 +2719,5 @@ DelayHlt:  0FD7            L0208:  0F56
 DelayHltLoop:  0FD9            L0209:  0F5A
 L0002:  0FDF            L0210:  0F8D
 L0213:  0FE1            L0211:  0FCF
-L0001:  1000            DelayHltLoop:  0FD9
+UpgradeRomAddr:  1000            DelayHltLoop:  0FD9
 L0197:  EE02            L0213:  0FE1
