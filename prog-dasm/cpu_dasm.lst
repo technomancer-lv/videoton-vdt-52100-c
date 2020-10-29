@@ -16,7 +16,7 @@
 ;30h - 
 ;32h - 
 ;40h - possibly a printer port?
-;80h - 
+;80h - seems like an IO device that holds cursor position
 
 ;Interrupts
 ;Seems like interrupts are used to get CPU out of the HALT state, so most likely
@@ -30,6 +30,7 @@
 ;Control regiters:
 ;4000,1h - initialised with 003Dh? An address that is used for a loop at one point.
 ;4002,3h - seems like current symbol address in memory, cursor position
+;4004h - something video related
 ;4005h - current line number?
 ;4006h - current symbol number in line?
 ;4007h - seems like program status register
@@ -41,10 +42,13 @@
 ;	5
 ;	6
 ;	7 - something on-line related, RTS is set depending on this
+;4008h - might be the row number that is being output at the moment
 ;4009h - 02 something related to baudrate change
 ;400Ah - 
 ;400E,F,10,11h - something related to received symbols? Pointers?
 ;4017,8h - some kind of pointer
+;401Ah - 
+;401Bh - 
 ;401Ch - maybe this stores ON LINE status?
 ;401Dh - baud rate and format register
 ;		high nibble - baudrate
@@ -112,49 +116,55 @@ ProgLoop:	CALL	L0004			;Serial routine
 
 				RST 7
 				RST 7
-				PUSH H
-0027   0039 2A 00 40            LHLD 4000H
-0028   003C E9                  PCHL
+				PUSH H			;Strange loop
+				LHLD 4000H
+				PCHL
 
-0029   003D F5                  PUSH PSW
-		PUSH D
-0031   003F 21 08 40            LXI H,4008H
-0032   0042 35                  DCR M
-0033   0043 FA 99 00            JM L0007
-0034   0046 7E                  MOV A,M
-0035   0047 FE 17               CPI 17H
-0036   0049 CA AE 00            JZ L0008
-0037   004C CD D4 08            CALL GetRowAddr
-0038   004F 3A 04 40            LDA 4004H
-0039   0052 D3 04       L0013:  OUT 04H
-0040   0054 5E                  MOV E,M
-0041   0055 D3 40               OUT 40H
-0042   0057 C5                  PUSH B
-0043   0058 21 08 40            LXI H,4008H
-0044   005B 3A 05 40            LDA 4005H
-0045   005E BE                  CMP M
-0046   005F C2 67 00            JNZ L0010
-0047   0062 3A 06 40            LDA 4006H
-0048   0065 D3 80               OUT 80H
-0049   0067 CD DB 00    L0010:  CALL L0011
-0050   006A 3A 08 40            LDA 4008H
-0051   006D FE 16               CPI 16H
-0052   006F CC B6 00            CZ L0012
-0053   0072 C1                  POP B
-0054   0073 D1                  POP D
-0055   0074 F1                  POP PSW
-0056   0075 E1                  POP H
-0057   0076 FB                  EI
-0058   0077 C9                  RET
+				PUSH PSW
+				PUSH D
+				LXI H,4008H		;Reads value from the memory. Possibly the line number that is being output
+								;on the screen at the moment?
+				DCR M			
+				JM L0007		;Seems that checks if line number is down lower than 0
+								;That might be the end of the screen - show one row full with hyphens
+								;And next line with status line data
+				MOV A,M
+				CPI 17H
+				JZ L0008		;This might be the beginning of the screen, first line
+								
+								;This is routine screen data output
+				CALL GetRowAddr
+				LDA 4004H
+L0013:			OUT 04H
+				MOV E,M			;Reads screen data from the memory
+				OUT 40H
+				PUSH B
+				LXI H,4008H		;Compares cursor line number with output line number. Maybe cursor functionality?
+				LDA 4005H
+				CMP M
+				JNZ L0010
+				LDA 4006H		;Outputs cursor position in line to hardware. Most likely to show the cursor.
+				OUT 80H
+L0010:			CALL L0011		;Seems like here it does routine serial functions
+				LDA 4008H
+				CPI 16H
+				CZ L0012
+				POP B
+				POP D
+				POP PSW
+				POP H
+				EI
+				RET			;End of INT
 
 
-0059   0078 36 18       L0014:  MVI M,18H
-0060   007A 3A 09 40            LDA 4009H
+								;This should be the part that outputs line with hyphens?
+0059   0078 36 18       L0014:  MVI M,18H	;Re-inits the output line variable
+0060   007A 3A 09 40            LDA 4009H	;Some status bit change
 0061   007D E6 02               ANI 02H
 0062   007F 57                  MOV D,A
 0063   0080 3A 07 40            LDA 4007H
 0064   0083 E6 FD               ANI 0FDH
-0065   0085 B2                  ORA D
+0065   0085 B2                  ORA D		
 0066   0086 D3 0C               OUT 0CH
 0067   0088 3E 81               MVI A,81H
 0068   008A D3 40               OUT 40H
@@ -163,19 +173,24 @@ ProgLoop:	CALL	L0004			;Serial routine
 0071   0091 35                  DCR M
 0072   0092 C2 52 00            JNZ L0013
 0073   0095 34                  INR M
-0074   0096 C3 52 00            JMP L0013
-0075   0099 E2 78 00    L0007:  JPO L0014
-0076   009C 3E 2F               MVI A,2FH
-0077   009E 21 1A 40            LXI H,401AH
-0078   00A1 35                  DCR M
-0079   00A2 C2 A8 00            JNZ L0015
-0080   00A5 34                  INR M
-0081   00A6 D3 0E               OUT 0EH
-0082   00A8 21 B2 48    L0015:  LXI H,48B2H
-0083   00AB C3 52 00            JMP L0013
+0074   0096 C3 52 00            JMP L0013	;Processes rest as a simple line
+
+								;Jumps here to output last two lines of the screen - hyphen line and status line
+L0007:			JPO L0014		;Odd parity - output hyphens
+												;Even parity - output status line
+				MVI A,2FH
+				LXI H,401AH
+				DCR M
+				JNZ L0015
+				INR M
+				OUT 0EH
+L0015:			LXI H,48B2H		;Status line start address
+				JMP L0013		;Processes it as any other line but with status line address
+
 0084   00AE CD D4 08    L0008:  CALL GetRowAddr
 0085   00B1 3E 0F               MVI A,0FH
 0086   00B3 C3 52 00            JMP L0013
+
 0087   00B6 21 1B 40    L0012:  LXI H,401BH
 0088   00B9 11 0A 40            LXI D,400AH
 0089   00BC DB 0E               IN 0EH
@@ -196,13 +211,16 @@ ProgLoop:	CALL	L0004			;Serial routine
 0104   00D7 C9                  RET
 0105   00D8 36 05       L0017:  MVI M,05H
 0106   00DA C9                  RET
+
+								;Checks two status bits and decides if do some serial functions?
 0107   00DB 21 07 40    L0011:  LXI H,4007H
 0108   00DE 7E                  MOV A,M
 0109   00DF E6 08               ANI 08H
 0110   00E1 C2 18 01            JNZ L0018
 0111   00E4 7E                  MOV A,M
-0112   00E5 E6 01               ANI 01H
+0112   00E5 E6 01               ANI 01H	
 0113   00E7 C8                  RZ
+
 0114   00E8 DB 1B               IN 1BH		;Serial
 0115   00EA 0F                  RRC
 0116   00EB 0F                  RRC
@@ -213,8 +231,8 @@ ProgLoop:	CALL	L0004			;Serial routine
 0121   00F5 CD F7 06            CALL L0020
 0122   00F8 3E 20               MVI A,20H
 0123   00FA CD 89 0B            CALL L0021
-0124   00FD 3E 37               MVI A,37H
-0125   00FF D3 1B               OUT 1BH		;Serial
+0124   00FD 3E 37               MVI A,37H	;Reset 8251 error flags
+0125   00FF D3 1B               OUT 1BH		;
 0126   0101 CD 54 01            CALL L0022
 0127   0104 78                  MOV A,B
 0128   0105 E6 08               ANI 08H
@@ -225,7 +243,7 @@ ProgLoop:	CALL	L0004			;Serial routine
 0132   010F DB 1A       L0019:  IN 1AH		;Reads received data from the 8251
 0133   0111 4F                  MOV C,A
 0134   0112 21 A8 47    L0023:  LXI H,47A8H
-0135   0115 C3 A5 0E            JMP FifoAdd
+0135   0115 C3 A5 0E            JMP FifoAdd	;Adds received data to FIFO buffer
 
 0136   0118 DB 1B       L0018:  IN 1BH		;Serial
 0137   011A 0F                  RRC
@@ -1245,6 +1263,8 @@ L0155:  CALL L0121		;Can jump here using L0051
 				;This function is getting the first address of requested screen line.
 				;It takes requested line number from the A and calculates the address
 				;in memory that corresponds to first symbol of this row.
+				;Argument - A
+				;Result - HL
 
 GetRowAddr:		ADD A		;A=A*2
 				MOV E,A
