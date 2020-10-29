@@ -44,19 +44,21 @@
 ;4009h - 02 something related to baudrate change
 ;400Ah - 
 ;400E,F,10,11h - something related to received symbols? Pointers?
+;4017,8h - some kind of pointer
 ;401Ch - maybe this stores ON LINE status?
 ;401Dh - baud rate and format register
 ;		high nibble - baudrate
 ;			
 ;		low nibble - format
 
-;4017,8h - some kind of pointer
 ;4020h - 
-;47A8,9h - some kind of FIFO addresses?
+;4028h - 47A7h - video data, 1920 bytes (24 lines, 80 symbols)
+;47A8,9h - received data FIFO pointers.
+; - received data FIFO buffer
+;48ABh - FIFO pointers, possibly for transmit
+; - transmit data FIFO buffer
 ;48B2h - 4901h - one row, status line
-	
-;Video line structure in memory:
-;..
+;4902h - 4931h - static table contains first addresses of each line
 
 ;NOTES
 ;Beginning of the RAM are some kind of status registers.
@@ -220,16 +222,16 @@ ProgLoop:	CALL	L0004			;Serial routine
 0130   010A 0E 7F               MVI C,7FH
 0131   010C C3 12 01            JMP L0023
 
-0132   010F DB 1A       L0019:  IN 1AH		;Serial data
+0132   010F DB 1A       L0019:  IN 1AH		;Reads received data from the 8251
 0133   0111 4F                  MOV C,A
 0134   0112 21 A8 47    L0023:  LXI H,47A8H
-0135   0115 C3 A5 0E            JMP L0024
+0135   0115 C3 A5 0E            JMP FifoAdd
 
 0136   0118 DB 1B       L0018:  IN 1BH		;Serial
 0137   011A 0F                  RRC
 0138   011B D0                  RNC
 0139   011C 21 AB 48            LXI H,48ABH
-0140   011F CD B8 0E            CALL L0025
+0140   011F CD B8 0E            CALL FifoGet
 0141   0122 C8                  RZ
 0142   0123 79                  MOV A,C
 0143   0124 D3 1A               OUT 1AH		;Serial data
@@ -359,7 +361,7 @@ L0004:  LDA 4007H
 		RET
 
 0239   01E3 21 A8 47    L0040:  LXI H,47A8H
-0240   01E6 CD B8 0E            CALL L0025	;FIFO?
+0240   01E6 CD B8 0E            CALL FifoGet	;FIFO?
 0241   01E9 C0                  RNZ
 0242   01EA DB 1B               IN 1BH		;Serial status read
 0243   01EC E6 80               ANI 80H		;Checks if DSR bit is 0?
@@ -373,12 +375,12 @@ L0043:  IN 1BH		;Reads 8251 status reg
 		ANI 80H		;Checks DSR state
 		JZ L0042	;Outputs DATA LINE NOT READY on fault and returns
 		LXI H,48ABH
-		CALL L0024	;?
-		RNZ
+		CALL FifoAdd	;Adds C to transmit FIFO
+		RNZ			;Returns if data successfully added
 		LDA 401EH
 		DCR A
 		JNZ L0043	;Loops 50 times to check DSR and???
-		LXI H,48B2H
+		LXI H,48B2H	;Calculates beginning of the message
 		MVI D,00H
 		MVI E,12H
 		DAD D
@@ -654,7 +656,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0516   0425 C3 A2 0A            JMP L0087
 0517   0428 E5          L0081:  PUSH H
 0518   0429 EB                  XCHG
-0519   042A CD B0 0F            CALL L0088
+0519   042A CD B0 0F            CALL SubDeHl
 0520   042D 2B                  DCX H
 0521   042E D1                  POP D
 0522   042F 42                  MOV B,D
@@ -670,7 +672,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0532   0441 CD B7 0F            CALL CmpRegHlDe
 0533   0444 D2 75 04            JNC L0090
 0534   0447 EB                  XCHG
-0535   0448 CD B0 0F            CALL L0088
+0535   0448 CD B0 0F            CALL SubDeHl
 0536   044B 2B                  DCX H
 0537   044C CD 2B 09            CALL L0091
 0538   044F 2A 02 40    L0093:  LHLD 4002H
@@ -692,7 +694,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0554   0472 C3 A2 0A            JMP L0087
 0555   0475 EB          L0090:  XCHG
 0556   0476 21 A7 47            LXI H,47A7H
-0557   0479 CD B0 0F            CALL L0088
+0557   0479 CD B0 0F            CALL SubDeHl
 0558   047C CD 2B 09            CALL L0091
 0559   047F 21 28 40            LXI H,4028H
 0560   0482 56                  MOV D,M
@@ -700,7 +702,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0562   0484 D5                  PUSH D
 0563   0485 11 29 40            LXI D,4029H
 0564   0488 2A 21 40            LHLD 4021H
-0565   048B CD B0 0F            CALL L0088
+0565   048B CD B0 0F            CALL SubDeHl
 0566   048E C1                  POP B
 0567   048F CD 36 09            CALL L0092
 0568   0492 C3 4F 04            JMP L0093
@@ -740,7 +742,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0602   04DF 59                  MOV E,C
 0603   04E0 CD B7 0F            CALL CmpRegHlDe
 0604   04E3 CA F2 04            JZ L0099
-0605   04E6 CD B0 0F            CALL L0088
+0605   04E6 CD B0 0F            CALL SubDeHl
 0606   04E9 11 28 40            LXI D,4028H
 0607   04EC CD 9A 0F            CALL L0098
 0608   04EF C3 C1 04            JMP L0100
@@ -752,7 +754,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0614   04FD 44                  MOV B,H
 0615   04FE 4D                  MOV C,L
 0616   04FF EB                  XCHG
-0617   0500 CD B0 0F            CALL L0088
+0617   0500 CD B0 0F            CALL SubDeHl
 0618   0503 D1                  POP D
 0619   0504 C3 9A 0F            JMP L0098
 0620   0507 3A 20 40            LDA 4020H
@@ -792,10 +794,10 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0654   0555 4B                  MOV C,E
 0655   0556 EB                  XCHG
 0656   0557 11 50 00            LXI D,0050H
-0657   055A CD B0 0F            CALL L0088
+0657   055A CD B0 0F            CALL SubDeHl
 0658   055D D1                  POP D
 0659   055E E5                  PUSH H
-0660   055F CD B0 0F            CALL L0088
+0660   055F CD B0 0F            CALL SubDeHl
 0661   0562 D1                  POP D
 0662   0563 23                  INX H
 0663   0564 C3 8F 0F            JMP L0105
@@ -2202,44 +2204,51 @@ Copy3Bytes:		MOV		M,A
 				MOV		M,A
 				RET
 
-2041   0EA5 7E          L0024:  MOV A,M
+								;This should be FIFO function that adds data to FIFO
+								;Called just after the data is read from the 8251
+								;First byte that HL is pointing at is a relative pointer that's used 
+								;to add bytes to FIFO.
+								;Second seems to be the relative pointer that's the end of the FIFO.
+								;Third one - unclear.
+2041   0EA5 7E          FifoAdd:  MOV A,M		;Reads relative FIFO pointer from memory
 2042   0EA6 23                  INX H
-2043   0EA7 46                  MOV B,M
+2043   0EA7 46                  MOV B,M		;Reads relative FIFO pointer from memory
 2044   0EA8 23                  INX H
-2045   0EA9 3C                  INR A
-2046   0EAA A6                  ANA M
-2047   0EAB B8                  CMP B
+2045   0EA9 3C                  INR A		;Increments pointer
+2046   0EAA A6                  ANA M		;Ands with memory? Why?
+2047   0EAB B8                  CMP B		;Compares with B and returns if equal.
+											;It tests if FIFO is full and more data can't be added.
 2048   0EAC C8                  RZ
-2049   0EAD 5F                  MOV E,A
-2050   0EAE 16 00               MVI D,00H
+2049   0EAD 5F                  MOV E,A		
+2050   0EAE 16 00               MVI D,00H	;Calculates data absolute address in memory
 2051   0EB0 EB                  XCHG
-2052   0EB1 23                  INX H
+2052   0EB1 23                  INX H		;
 2053   0EB2 19                  DAD D
-2054   0EB3 71                  MOV M,C
+2054   0EB3 71                  MOV M,C		;Saves data into memory
 2055   0EB4 1B                  DCX D
 2056   0EB5 1B                  DCX D
-2057   0EB6 12                  STAX D
+2057   0EB6 12                  STAX D		;Saves the modified pointer to the memory
 2058   0EB7 C9                  RET
 
-2059   0EB8 46          L0025:  MOV B,M		;Seems like this is some kind of FIFO function?
-2060   0EB9 23                  INX H
-2061   0EBA 7E                  MOV A,M
-2062   0EBB B8                  CMP B
-2063   0EBC C8                  RZ			;Returns if two consecutive predefined memory locations
-											;are equal. Pointers? FIFO? 
-2064   0EBD 3C                  INR A		
-2065   0EBE 23                  INX H
-2066   0EBF A6                  ANA M
-2067   0EC0 5F                  MOV E,A
-2068   0EC1 16 00               MVI D,00H
-2069   0EC3 EB                  XCHG
-2070   0EC4 23                  INX H
-2071   0EC5 19                  DAD D
-2072   0EC6 4E                  MOV C,M
-2073   0EC7 1B                  DCX D
-2074   0EC8 12                  STAX D
-2075   0EC9 F6 01               ORI 01H
-2076   0ECB C9                  RET			;Returns?
+FifoGet:		MOV B,M		;Gets data byte from the FIFO
+				INX H
+				MOV A,M
+				CMP B
+				RZ			;Returns if FIFO is empty
+				INR A		
+				INX H
+				ANA M	;ANDs with memory. Why?
+				MOV E,A
+				MVI D,00H
+				XCHG
+				INX H
+				DAD D
+				MOV C,M	;Reads data from the memory
+				DCX D
+				STAX D	;Saves modified pointer back to memory
+				ORI 01H	;Returns with something other than 0 in A
+				RET
+
 
 											;Jumps here in case if received CR, LF or FF code.
 
@@ -2360,7 +2369,7 @@ Copy3Bytes:		MOV		M,A
 2181   0F70 29                  DAD H
 2182   0F71 29                  DAD H
 2183   0F72 29                  DAD H
-2184   0F73 CD B0 0F            CALL L0088
+2184   0F73 CD B0 0F            CALL SubDeHl
 2185   0F76 11 32 49            LXI D,4932H
 2186   0F79 19                  DAD D
 2187   0F7A C9                  RET
@@ -2411,7 +2420,9 @@ L0050:  STAX D		;Saves code from A into the memory
 		JP L0050	;Loops for times defined in HL
 		RET
 
-2229   0FB0 7D          L0088:  MOV A,L
+
+								;Subtracts DE from HL
+2229   0FB0 7D          SubDeHl:  MOV A,L
 2230   0FB1 93                  SUB E
 2231   0FB2 6F                  MOV L,A
 2232   0FB3 7C                  MOV A,H
@@ -2531,8 +2542,8 @@ L0029:  0160            L0020:  06F7
 L0026:  0163            L0021:  0B89
 L0154:  0169            L0022:  0154
 L0045:  017A            L0023:  0112
-L0037:  019C            L0024:  0EA5
-L0186:  01A1            L0025:  0EB8
+L0037:  019C            FifoAdd:  0EA5
+L0186:  01A1            FifoGet:  0EB8
 L0033:  01B0            L0026:  0163
 L0036:  01C1            L0027:  0C60
 RetA0:  01C4            L0028:  014A
@@ -2595,7 +2606,7 @@ L0044:  0648            L0084:  0972
 L0155:  0660            L0085:  03DF
 L0125:  0673            L0086:  0495
 L0123:  067F            L0087:  0AA2
-L0124:  0693            L0088:  0FB0
+L0124:  0693            SubDeHl:  0FB0
 L0122:  06A9            L0089:  045D
 L0126:  06BB            L0090:  0475
 L0127:  06D2            L0091:  092B
@@ -2689,8 +2700,8 @@ L0027:  0C60            L0178:  0B1A
 L0038:  0CAE            L0179:  0B44
 L0195:  0CB0            L0180:  0B23
 Copy3Bytes:  0E9F            L0181:  0B41
-L0024:  0EA5            L0182:  062E
-L0025:  0EB8            DelayHlt:  0FD7
+FifoAdd:  0EA5            L0182:  062E
+FifoGet:  0EB8            DelayHlt:  0FD7
 L0111:  0ECC            Copy3Bytes:  0E9F
 L0204:  0ECD            L0185:  0BCB
 L0200:  0EF6            L0186:  01A1
@@ -2709,7 +2720,7 @@ L0210:  0F8D            L0198:  0F7B
 L0105:  0F8F            CmpRegBcDe:  0FBD
 L0098:  0F9A            L0200:  0EF6
 L0050:  0FA5            L0201:  0F68
-L0088:  0FB0            L0202:  0F1A
+SubDeHl:  0FB0            L0202:  0F1A
 CmpRegHlDe:  0FB7            L0203:  0F02
 CmpRegBcDe:  0FBD            L0204:  0ECD
 L0051:  0FC3            L0205:  0F18
