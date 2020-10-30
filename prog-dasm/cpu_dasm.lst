@@ -29,7 +29,7 @@
 
 ;Control regiters:
 ;4000,1h - initialised with 003Dh? An address that is used for a loop at one point.
-;4002,3h - seems like current symbol address in memory, cursor position
+;4002,3h - seems like current symbol address in memory, cursor position. Highest bit seems to disable the output on the screen
 ;4004h - something video related
 ;4005h - current line number?
 ;4006h - current symbol number in line?
@@ -46,7 +46,7 @@
 ;4009h - 02 something related to baudrate change
 ;400Ah - 
 ;400E,F,10,11h - something related to received symbols? Pointers?
-;4017,8h - some kind of pointer
+;4017,8h - some kind of pointer, line address?
 ;401Ah - 
 ;401Bh - 
 ;401Ch - maybe this stores ON LINE status?
@@ -70,47 +70,47 @@
 
 ;=========================================================================================
 
-ProgStart:  MVI A,0FH		;Program start - address 0000h	
-			OUT 40H			;Printer port init? Or something video related?
+ProgStart:  	MVI A,0FH		;Program start - address 0000h	
+				OUT 40H			;Printer port init? Or something video related?
 
-			LXI H,003DH
-			SHLD 4000H		;?	Saves an address in the very first address of the RAM
+				LXI H,003DH
+				SHLD 4000H		;?	Saves an address in the very first address of the RAM
 							;But why? At some point it jumps to that address.
 
-			LXI H,1000H
-			MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
+				LXI H,1000H
+				MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
 							;If it is, it jumps to the 0x1000 and executes
 							;code located there. Most likely for test
 							;or upgrade purposes.
-			CMP M
-			JZ UpgradeRomAddr	;Jumps to 1000h
+				CMP M
+				JZ UpgradeRomAddr	;Jumps to 1000h
 
-			EI				;Enable interrupt (timer? video pulses?)
+				EI				;Enable interrupt (timer? video pulses?)
 
-			OUT 0EH			;Outputs WHAT to the 0Eh?
+				OUT 0EH			;Outputs WHAT to the 0Eh?
 		
-			LXI SP,5000H	;SP init
+				LXI SP,5000H	;SP init
 		
-			LXI H,0D9CH
-			LXI D,4002H
-			CALL L0002		;Copies some data from ROM to RAM. What data?
+				LXI H,0D9CH
+				LXI D,4002H
+				CALL L0002		;Copies some data from ROM to RAM. What data?
 	
 							;Inits:
 							;..
 							;..
 							;Checks if serial line is available
-			CALL HwInit		;Hardware init?
+				CALL HwInit		;Hardware init?
 
-			;Constant program loop
+				;Constant program loop
 			
-ProgLoop:	CALL	L0004			;Serial routine
-			PUSH	B
-			CNZ		L0005		
-			POP		B
-			MOV		A,C
-			ANI		7FH
-			STA		4020H
-			JMP		ProgLoop		;Constant program loop end
+ProgLoop:		CALL	L0004			;Serial routine, reads data from the FIFO if available
+				PUSH	B
+				CNZ		L0005			;If 0004 returns with data, this processes the data
+				POP		B
+				MOV		A,C
+				ANI		7FH
+				STA		4020H
+				JMP		ProgLoop		;Constant program loop end
 
 				;Is it possible to somehow get there? Seems like INT routine.
 
@@ -158,22 +158,22 @@ L0010:			CALL L0011		;Seems like here it does routine serial functions
 
 
 								;This should be the part that outputs line with hyphens?
-0059   0078 36 18       L0014:  MVI M,18H	;Re-inits the output line variable
-0060   007A 3A 09 40            LDA 4009H	;Some status bit change
-0061   007D E6 02               ANI 02H
-0062   007F 57                  MOV D,A
-0063   0080 3A 07 40            LDA 4007H
-0064   0083 E6 FD               ANI 0FDH
-0065   0085 B2                  ORA D		
-0066   0086 D3 0C               OUT 0CH
-0067   0088 3E 81               MVI A,81H
-0068   008A D3 40               OUT 40H
-0069   008C 3E 1F               MVI A,1FH
-0070   008E 21 1E 40            LXI H,401EH
-0071   0091 35                  DCR M
-0072   0092 C2 52 00            JNZ L0013
-0073   0095 34                  INR M
-0074   0096 C3 52 00            JMP L0013	;Processes rest as a simple line
+L0014:			MVI M,18H	;Re-inits the output line variable
+				LDA 4009H	;Some status bit change
+				ANI 02H
+				MOV D,A
+				LDA 4007H
+				ANI 0FDH
+				ORA D		
+				OUT 0CH
+				MVI A,81H
+				OUT 40H
+				MVI A,1FH
+				LXI H,401EH
+				DCR M
+				JNZ L0013
+				INR M
+				JMP L0013	;Processes rest as a simple line
 
 								;Jumps here to output last two lines of the screen - hyphen line and status line
 L0007:			JPO L0014		;Odd parity - output hyphens
@@ -186,6 +186,7 @@ L0007:			JPO L0014		;Odd parity - output hyphens
 				OUT 0EH
 L0015:			LXI H,48B2H		;Status line start address
 				JMP L0013		;Processes it as any other line but with status line address
+
 
 0084   00AE CD D4 08    L0008:  CALL GetRowAddr
 0085   00B1 3E 0F               MVI A,0FH
@@ -243,7 +244,7 @@ L0015:			LXI H,48B2H		;Status line start address
 0132   010F DB 1A       L0019:  IN 1AH		;Reads received data from the 8251
 0133   0111 4F                  MOV C,A
 0134   0112 21 A8 47    L0023:  LXI H,47A8H
-0135   0115 C3 A5 0E            JMP FifoAdd	;Adds received data to FIFO buffer
+0135   0115 C3 A5 0E            JMP FifoAdd	;Adds received data to FIFO buffer and returns
 
 0136   0118 DB 1B       L0018:  IN 1BH		;Serial
 0137   011A 0F                  RRC
@@ -252,7 +253,7 @@ L0015:			LXI H,48B2H		;Status line start address
 0140   011F CD B8 0E            CALL FifoGet
 0141   0122 C8                  RZ
 0142   0123 79                  MOV A,C
-0143   0124 D3 1A               OUT 1AH		;Serial data
+0143   0124 D3 1A               OUT 1AH		;Serial data output to computer
 0144   0126 C9                  RET
 
 0145   0127 21 1D 40    L0049:  LXI H,401DH	;Read baudrate reg
@@ -367,7 +368,7 @@ L0004:  LDA 4007H
 		ANI 02H					;Checks bit 1 in reg 4007h
 		JNZ L0039
 		CALL L0040				;Possibly checks data fifo status and DSR status
-		RNZ						;If DSR is inactive, it returns from this function
+		RNZ						;If DSR is inactive or data is read, it returns from this function
 								;Else
 		CALL L0039				;Possibly checks second fifo
 		RZ
@@ -378,8 +379,8 @@ L0004:  LDA 4007H
 		XRA A
 		RET
 
-0239   01E3 21 A8 47    L0040:  LXI H,47A8H
-0240   01E6 CD B8 0E            CALL FifoGet	;FIFO?
+0239   01E3 21 A8 47    L0040:  LXI H,47A8H		;Received data FIFO address
+0240   01E6 CD B8 0E            CALL FifoGet	;Gets received data from the FIFO
 0241   01E9 C0                  RNZ
 0242   01EA DB 1B               IN 1BH		;Serial status read
 0243   01EC E6 80               ANI 80H		;Checks if DSR bit is 0?
@@ -459,14 +460,17 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0311   0274 C9                  RET
 
 											;This is being clled from the program loop
+											;Seems that it processes the data exchange, at least received data?
 
-0312   0275 79          L0005:  MOV A,C		
-0313   0276 E6 60               ANI 60H
-0314   0278 CA 84 02            JZ L0052
-0315   027B CD 7D 08            CALL L0053
-0316   027E CA 4A 03            JZ L0054
-0317   0281 C3 EE 02            JMP L0055
+L0005:			MOV A,C		
+				ANI 60H		;Tests if received data is printable? 
+				JZ L0052	;If unprintable, jumps
+											;Else, if printable:
+				CALL L0053	;Puts data on the screen, returns with 0 in A if successful
+				JZ L0054	;Jumps if data successfully output.
+				JMP L0055	;Jumps if unsuccessful
 
+											;Here it process received unprintable characters
 0318   0284 79          L0052:  MOV A,C
 0319   0285 E6 7F               ANI 7FH
 0320   0287 21 47 0D            LXI H,0D47H
@@ -519,25 +523,31 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0365   02D6 D8                  RC
 0366   02D7 EE 10               XRI 10H
 0367   02D9 C9                  RET
-0368   02DA 21 06 40            LXI H,4006H
-0369   02DD 35                  DCR M
-0370   02DE 5E                  MOV E,M
-0371   02DF 2A 02 40            LHLD 4002H
-0372   02E2 2B                  DCX H
-0373   02E3 F2 9D 09            JP L0060
-0374   02E6 3E 4F               MVI A,4FH
-0375   02E8 32 06 40            STA 4006H
-0376   02EB C3 21 03            JMP L0061
-0377   02EE 21 06 40    L0055:  LXI H,4006H
+
+							;Backspace function, cursor position decrement
+UNP08:			LXI H,4006H
+				DCR M
+				MOV E,M
+				LHLD 4002H
+				DCX H
+				JP L0060
+				MVI A,4FH
+				STA 4006H
+				JMP L0061
+
+
+									;Seems like cursor increment here
+0377   02EE 21 06 40    L0055:  LXI H,4006H	;CAN code
 0378   02F1 3E 50               MVI A,50H
-0379   02F3 34                  INR M
-0380   02F4 BE                  CMP M
+0379   02F3 34                  INR M		;Increments cursor position
+0380   02F4 BE                  CMP M		;Checks if it's over the 80. position of the row
 0381   02F5 2A 02 40            LHLD 4002H
-0382   02F8 23                  INX H
-0383   02F9 C2 9D 09            JNZ L0060
+0382   02F8 23                  INX H		;Increases absolute cursor address
+0383   02F9 C2 9D 09            JNZ L0060	;Jumps if not last symbol
 0384   02FC AF                  XRA A
-0385   02FD 32 06 40            STA 4006H
-0386   0300 21 05 40    L0066:  LXI H,4005H
+0385   02FD 32 06 40            STA 4006H	;If last, saves cursor position as 0 in row
+
+0386   0300 21 05 40    L0066:  LXI H,4005H	;SUB code
 0387   0303 35                  DCR M
 0388   0304 F2 8D 09            JP L0062
 0389   0307 11 07 40            LXI D,4007H
@@ -552,38 +562,43 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0398   0319 3E 08               MVI A,08H
 0399   031B CD 8F 0B            CALL L0065
 0400   031E C3 8D 09            JMP L0062
-0401   0321 21 05 40    L0061:  LXI H,4005H
-0402   0324 3E 18               MVI A,18H
-0403   0326 34                  INR M
-0404   0327 BE                  CMP M
-0405   0328 C2 8D 09            JNZ L0062
-0406   032B 36 00               MVI M,00H
-0407   032D C3 8D 09            JMP L0062
-0408   0330 AF                  XRA A
-0409   0331 32 06 40            STA 4006H
-0410   0334 C3 8D 09            JMP L0062
 
-											;Jumps here after the screen wipe at initialisation
+L0061:			LXI H,4005H		;EM code
+				MVI A,18H
+				INR M
+				CMP M
+				JNZ L0062
+				MVI M,00H
+				JMP L0062
 
-0411   0337 3E 17       L0068:  MVI A,17H	;4005h init
-0412   0339 32 05 40            STA 4005H
-0413   033C AF                  XRA A
-0414   033D 32 06 40            STA 4006H	;4006h init
-0415   0340 C3 8D 09            JMP L0062
+UNP0D:			XRA A			;Can jump here when processing CR code
+				STA 4006H
+				JMP L0062
 
-0416   0343 AF          L0116:  XRA A
-0417   0344 32 06 40            STA 4006H
-0418   0347 C3 00 03            JMP L0066
-0419   034A 3A 0B 40    L0054:  LDA 400BH
-0420   034D FE 00               CPI 00H
-0421   034F C2 65 03            JNZ L0067
-0422   0352 3A 0C 40            LDA 400CH
-0423   0355 FE 00               CPI 00H
+											;Cursor init
+
+CursorInit:		MVI A,17H	;Line 0		Can jump here when received FF code
+				STA 4005H
+				XRA A
+				STA 4006H	;Symbol 0
+				JMP L0062	;Jumps to function that sets absolute cursor position from the
+							;line and symbol position values.
+
+L0116:			XRA A		;Can jump here when received a LF code (0x0A)
+				STA 4006H
+				JMP L0066
+
+
+L0054:			LDA 400BH		;Can jump here when received a TAB code
+				CPI 00H
+				JNZ L0067
+				LDA 400CH
+				CPI 00H
 0424   0357 C2 65 03            JNZ L0067
 0425   035A 3A 0D 40            LDA 400DH
 0426   035D FE 00               CPI 00H
 0427   035F C2 65 03            JNZ L0067
-0428   0362 C3 37 03            JMP L0068
+0428   0362 C3 37 03            JMP CursorInit
 0429   0365 3A 06 40    L0067:  LDA 4006H
 0430   0368 57                  MOV D,A
 0431   0369 3A 05 40            LDA 4005H
@@ -591,7 +606,7 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0433   036D 0E 80               MVI C,80H
 0434   036F CD 05 09            CALL L0069
 0435   0372 C2 78 03            JNZ L0070
-0436   0375 C3 37 03            JMP L0068
+0436   0375 C3 37 03            JMP CursorInit
 0437   0378 7A          L0070:  MOV A,D
 0438   0379 32 06 40            STA 4006H
 0439   037C 7B                  MOV A,E
@@ -602,16 +617,17 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0444   0385 0E 00               MVI C,00H
 0445   0387 CD 05 09            CALL L0069
 0446   038A C2 90 03            JNZ L0071
-0447   038D C3 37 03            JMP L0068
+0447   038D C3 37 03            JMP CursorInit
 0448   0390 7A          L0071:  MOV A,D
 0449   0391 32 06 40            STA 4006H
 0450   0394 7B                  MOV A,E
 0451   0395 32 05 40            STA 4005H
 0452   0398 C3 8D 09            JMP L0062
-0453   039B 3A 20 40            LDA 4020H
-0454   039E FE 0E               CPI 0EH
-0455   03A0 CA BE 03            JZ L0072
-0456   03A3 21 28 40            LXI H,4028H
+
+UNP1F:			LDA 4020H
+				CPI 0EH
+				JZ L0072
+				LXI H,4028H
 0457   03A6 16 18               MVI D,18H
 0458   03A8 1E 50       L0075:  MVI E,50H
 0459   03AA 7E          L0074:  MOV A,M
@@ -623,16 +639,17 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0465   03B4 C2 AA 03            JNZ L0074
 0466   03B7 15                  DCR D
 0467   03B8 C2 A8 03            JNZ L0075
-0468   03BB C3 37 03            JMP L0068
+0468   03BB C3 37 03            JMP CursorInit
 0469   03BE AF          L0072:  XRA A
 0470   03BF 32 0B 40            STA 400BH
 0471   03C2 32 0C 40            STA 400CH
 0472   03C5 32 0D 40            STA 400DH
 0473   03C8 C3 53 0B            JMP L0076
-0474   03CB DB 0F               IN 0FH
-0475   03CD E6 80               ANI 80H
-0476   03CF CA 0F 04            JZ L0077
-0477   03D2 CD 82 09            CALL L0078
+
+UNP1D:			IN 0FH
+				ANI 80H
+				JZ L0077
+				CALL L0078
 0478   03D5 EB                  XCHG
 0479   03D6 2A 02 40            LHLD 4002H
 0480   03D9 CD B7 0F            CALL CmpRegHlDe
@@ -681,10 +698,11 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0523   0430 4B                  MOV C,E
 0524   0431 03                  INX B
 0525   0432 C9                  RET
-0526   0433 DB 0F               IN 0FH
-0527   0435 E6 80               ANI 80H
-0528   0437 CA 5D 04            JZ L0089
-0529   043A CD 82 09            CALL L0078
+
+UNP1C:			IN 0FH		;FS code
+				ANI 80H
+				JZ L0089
+				CALL L0078
 0530   043D EB                  XCHG
 0531   043E 2A 02 40            LHLD 4002H
 0532   0441 CD B7 0F            CALL CmpRegHlDe
@@ -730,9 +748,10 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0572   049B 47                  MOV B,A
 0573   049C 2A 02 40            LHLD 4002H
 0574   049F C9                  RET
-0575   04A0 3A 20 40            LDA 4020H
-0576   04A3 FE 0E               CPI 0EH
-0577   04A5 CA B1 04            JZ L0094
+
+UNP1E:			LDA 4020H
+				CPI 0EH
+				JZ L0094
 0578   04A8 21 0B 40            LXI H,400BH
 0579   04AB 7E                  MOV A,M
 0580   04AC 23                  INX H
@@ -775,9 +794,10 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0617   0500 CD B0 0F            CALL SubDeHl
 0618   0503 D1                  POP D
 0619   0504 C3 9A 0F            JMP L0098
-0620   0507 3A 20 40            LDA 4020H
-0621   050A FE 0E               CPI 0EH
-0622   050C CA 18 05            JZ L0101
+
+UNP0B:			LDA 4020H
+				CPI 0EH
+				JZ L0101
 0623   050F 21 0B 40            LXI H,400BH
 0624   0512 7E                  MOV A,M
 0625   0513 23                  INX H
@@ -819,9 +839,10 @@ L0043:  IN 1BH		;Reads 8251 status reg
 0661   0562 D1                  POP D
 0662   0563 23                  INX H
 0663   0564 C3 8F 0F            JMP L0105
-0664   0567 CD FF 0E            CALL L0107
-0665   056A C8                  RZ
-0666   056B 3A 07 40            LDA 4007H
+
+UNP17:			CALL L0107		;ETB code
+				RZ
+				LDA 4007H
 0667   056E F5                  PUSH PSW
 0668   056F 3E 04               MVI A,04H
 0669   0571 32 07 40            STA 4007H
@@ -962,11 +983,13 @@ L0155:  CALL L0121		;Can jump here using L0051
 0791   0695 E6 04               ANI 04H
 0792   0697 CA 93 06            JZ L0124
 0793   069A C3 54 01            JMP L0022
-0794   069D 3E 27               MVI A,27H
-0795   069F D3 1B               OUT 1BH		;Serial
-0796   06A1 3E 0F               MVI A,0FH
-0797   06A3 CD 8F 0B            CALL L0065
-0798   06A6 C3 73 06            JMP L0125
+
+UNP1B:			MVI A,27H		;ESC code
+				OUT 1BH		;Serial
+				MVI A,0FH
+				CALL L0065
+				JMP L0125
+
 0799   06A9 2A 02 40    L0122:  LHLD 4002H
 0800   06AC 4E                  MOV C,M
 0801   06AD 3A 20 40            LDA 4020H
@@ -1004,14 +1027,17 @@ L0155:  CALL L0121		;Can jump here using L0051
 0832   06EB CD 17 03    L0151:  CALL L0063
 0833   06EE 3E 40               MVI A,40H		;Can jump here using L0051
 0834   06F0 C3 96 0B            JMP L0128
-0835   06F3 C3 87 07            JMP L0129
-0836   06F6 C9                  RET
-0837   06F7 3E 0F       L0020:  MVI A,0FH
-0838   06F9 32 1A 40            STA 401AH
-0839   06FC D3 0F               OUT 0FH
-0840   06FE C9                  RET
-0841   06FF CD 1B 07            CALL L0130
-0842   0702 21 05 40            LXI H,4005H
+UNP10:			JMP L0129						;DLE code
+
+UNP00:			RET
+
+L0020:			MVI A,0FH		;Also jumps ere when BEL is received.
+				STA 401AH
+				OUT 0FH
+				RET
+
+UNP4:			CALL L0130
+				LXI H,4005H
 0843   0705 4E                  MOV C,M
 0844   0706 0D          L0132:  DCR C
 0845   0707 F8                  RM
@@ -1023,9 +1049,10 @@ L0155:  CALL L0121		;Can jump here using L0051
 0851   0714 79                  MOV A,C
 0852   0715 CD A4 09            CALL L0133
 0853   0718 C3 06 07            JMP L0132
-0854   071B 21 06 40    L0130:  LXI H,4006H
-0855   071E 3E 50               MVI A,50H
-0856   0720 96                  SUB M
+
+L0130:			LXI H,4006H		;NAK code
+				MVI A,50H
+				SUB M
 0857   0721 47                  MOV B,A
 0858   0722 2A 02 40            LHLD 4002H
 0859   0725 E5                  PUSH H
@@ -1059,8 +1086,9 @@ L0155:  CALL L0121		;Can jump here using L0051
 0887   0755 05                  DCR B
 0888   0756 C2 49 07            JNZ L0137
 0889   0759 C9                  RET
-0890   075A CD 87 07            CALL L0129
-0891   075D 79                  MOV A,C
+
+UNP01:			CALL L0129
+				MOV A,C
 0892   075E FE 1C               CPI 1CH
 0893   0760 D0                  RNC
 0894   0761 E6 0C               ANI 0CH
@@ -1089,35 +1117,40 @@ L0155:  CALL L0121		;Can jump here using L0051
 0917   078F CD 1F 02            CALL L0039
 0918   0792 CA 87 07            JZ L0129
 0919   0795 C9                  RET
+
 0920   0796 CD E3 01    L0140:  CALL L0040
 0921   0799 C0                  RNZ
 0922   079A C3 87 07            JMP L0129
-0923   079D 3E 10               MVI A,10H
-0924   079F CD 89 0B            CALL L0021
-0925   07A2 21 09 40            LXI H,4009H
-0926   07A5 3E 80               MVI A,80H
-0927   07A7 B6                  ORA M
-0928   07A8 77                  MOV M,A
-0929   07A9 C9                  RET
-0930   07AA 3E 10               MVI A,10H
-0931   07AC CD 8F 0B            CALL L0065
-0932   07AF 21 09 40            LXI H,4009H
-0933   07B2 3E 80               MVI A,80H
-0934   07B4 2F                  CMA
-0935   07B5 A6                  ANA M
-0936   07B6 77                  MOV M,A
-0937   07B7 C9                  RET
-0938   07B8 CD FF 0E            CALL L0107
-0939   07BB C8                  RZ
-0940   07BC 3E 04               MVI A,04H
-0941   07BE CD 89 0B            CALL L0021
-0942   07C1 3A 20 40            LDA 4020H
-0943   07C4 32 1F 40            STA 401FH
-0944   07C7 AF                  XRA A
-0945   07C8 32 20 40            STA 4020H
-0946   07CB CD C6 01    L0142:  CALL L0004
-0947   07CE C5                  PUSH B
-0948   07CF C4 DC 07            CNZ L0141
+
+								;Seems like un-contrasting the text or font switching?
+UNP0E:			MVI A,10H		;Shift-out
+				CALL L0021
+				LXI H,4009H
+				MVI A,80H
+				ORA M
+				MOV M,A
+				RET
+
+UNP0F:			MVI A,10H		;Shift-in
+				CALL L0065
+				LXI H,4009H
+				MVI A,80H
+				CMA
+				ANA M
+				MOV M,A
+				RET
+
+UNP11:			CALL L0107		;DC1 code
+				RZ
+				MVI A,04H
+				CALL L0021
+				LDA 4020H
+				STA 401FH
+				XRA A
+				STA 4020H
+L0142:			CALL L0004
+				PUSH B
+				CNZ L0141
 0949   07D2 C1                  POP B
 0950   07D3 79                  MOV A,C
 0951   07D4 E6 7F               ANI 7FH
@@ -1189,25 +1222,26 @@ L0155:  CALL L0121		;Can jump here using L0051
 1005   084C C9                  RET
 
 
-1006   084D 21 09 40            LXI H,4009H
-1007   0850 3E 02               MVI A,02H
-1008   0852 B6                  ORA M
-1009   0853 77                  MOV M,A
-1010   0854 C9                  RET
+UNP13:			LXI H,4009H		;DC3 code
+				MVI A,02H
+				ORA M
+				MOV M,A
+				RET
 
-1011   0855 21 09 40    L0146:  LXI H,4009H
-1012   0858 3E 02               MVI A,02H
-1013   085A 2F                  CMA
-1014   085B A6                  ANA M
-1015   085C 77                  MOV M,A
-1016   085D AF                  XRA A
-1017   085E 32 0A 40            STA 400AH
-1018   0861 C9                  RET
-1019   0862 21 05 40            LXI H,4005H
-1020   0865 4E                  MOV C,M
-1021   0866 23                  INX H
-1022   0867 46                  MOV B,M
-1023   0868 C5                  PUSH B
+L0146:			LXI H,4009H		;DC4 code
+				MVI A,02H
+				CMA
+				ANA M
+				MOV M,A
+				XRA A
+				STA 400AH
+				RET
+
+UNP16:			LXI H,4005H		;SYN code
+				MOV C,M
+				INX H
+				MOV B,M
+				PUSH B
 1024   0869 79                  MOV A,C
 1025   086A CD D4 08            CALL GetRowAddr
 1026   086D 37                  STC
@@ -1220,16 +1254,20 @@ L0155:  CALL L0121		;Can jump here using L0051
 1033   0877 16 00               MVI D,00H
 1034   0879 19                  DAD D
 1035   087A C3 32 07            JMP L0134
+
+										;Processes received printable data here?
 1036   087D 3A 09 40    L0053:  LDA 4009H
-1037   0880 E6 80               ANI 80H
+1037   0880 E6 80               ANI 80H		;Could this bit be the lat/rus?
 1038   0882 C2 90 08            JNZ L0149
-1039   0885 2A 02 40            LHLD 4002H
+1039   0885 2A 02 40            LHLD 4002H	;Checks cursor position???
 1040   0888 7E                  MOV A,M
-1041   0889 E6 80               ANI 80H
+1041   0889 E6 80               ANI 80H		;Seems like it does nothing if highest bit is set
 1042   088B FE 80               CPI 80H
 1043   088D C8                  RZ
-1044   088E 71                  MOV M,C
-1045   088F C9                  RET
+
+1044   088E 71                  MOV M,C		;Puts received data on the cursor position and returns
+1045   088F C9                  RET			
+
 1046   0890 B1          L0149:  ORA C
 1047   0891 4F                  MOV C,A
 1048   0892 CD AB 09            CALL L0150
@@ -1645,7 +1683,7 @@ L0076:  MVI A,20H
 		LXI H,0780H
 		CALL L0050		;Fills 1920 bytes from 4028h onwards with 20h (space)
 						;Most likely screen wipe.
-		JMP L0068
+		JMP CursorInit
 
 1429   0B61 CD 2E 06    L0121:  CALL L0182	;Wipes status line
 1430   0B64 3E 27               MVI A,27H	;Enables 8251 tx, rx, RTS and DTR
@@ -1986,15 +2024,52 @@ L0185:  MVI B,7AH
 				;DATA field, addresses
 				DW	06DEh,0648h,0660h,0669h,0629h,06EEh,06D3h
 
-				;DATA? Might be some kind of a pattern for 1Bh count of symbols
+				;Next two tables are used to jump to the functions depending on a unprintable 
+				;character that is being processed. It searches for the character in the first 
+				;table and then uses formula 1Bh-index to jump to address found in the next table.
+				;Decoded table:
+				;char  func  index addr		label
+				;00h - NUL - 0Dh - 06F6h	UNP00
+				;01h - SOH - 0Ch - 075Ah	UNP01
+				;02h - STX - none
+				;03h - ETX - none
+				;04h - EOT - 0Ah - 06FFh
+				;05h - ENQ - none
+				;06h - ACK - none
+				;07h - BEL - 1Bh - 06F7h	L0020
+				;08h - BS  - 0Eh - 02DAh	UNP08
+				;09h - TAB - 14h - 034Ah	L0054
+				;0Ah - LF  - 13h - 0343h	L0116
+				;0Bh - VT  - 19h - 0507h	UNP0B
+				;0Ch - FF  - 12h - 0337h	CursorInit
+				;0Dh - CR  - 0Bh - 0330h	UNP0D
+				;0Eh - SO  - 09h - 079Dh	UNP0E
+				;0Fh - SI  - 08h - 07AAh	UNP0F
+				;10h - DLE - 07h - 06F3h	UNP10
+				;11h - DC1 - 06h - 07B8h	UNP11
+				;12h - DC2 - none
+				;13h - DC3 - 04h - 084Dh	UNP13
+				;14h - DC4 - 03h - 0855h	L0146
+				;15h - NAK - 05h - 071Bh	L0130
+				;16h - SYN - 01h - 0862h	UNP16
+				;17h - ETB - 1Ah - 0567h	UNP17
+				;18h - CAN - 0Fh - 02EEh	L0055
+				;19h - EM  - 11h - 0321h	L0061
+				;1Ah - SUB - 10h - 0300h	L0066
+				;1Bh - ESC - 02h - 069Dh	UNP1B
+				;1Ch - FS  - 17h - 0433h	UNP1C
+				;1Dh - GS  - 16h - 03CBh	UNP1D
+				;1Eh - RS  - 18h - 04A0h	UNP1E
+				;1Fh - US  - 15h - 039Bh	
 
+				;DATA - unprintable character set
 				DB	1Bh,07h,17h,0Bh,1Eh,1Ch,1Dh,1Fh
 				DB	09h,0Ah,0Ch,19h,1Ah,18h,08h,00h
 				DB	01h,0Dh,04h,0Eh,0Fh,10h,11h,15h
 				DB	13h,14h,1Bh,16h,1Bh
 				
 				;DATA pattern start
-				;There are some jump addresses
+				;There are addresses that are used for unprintable character processing
 				DW	027Bh,0862h,069Dh,0855h,084Dh,071Bh,07B8h,06F3h
 				DW	07AAh,079Dh,06FFh,0330h,075Ah,06F6h,02DAh,02EEh
 				DW	0300h,0321h,0337h,0343h,034Ah,039Bh,03CBh,0433h
@@ -2582,7 +2657,7 @@ L0055:  02EE            L0040:  01E3
 L0066:  0300            L0041:  01F3
 L0063:  0317            L0042:  0639
 L0061:  0321            L0043:  01F8
-L0068:  0337            L0044:  0648
+CursorInit:  0337            L0044:  0648
 L0116:  0343            L0045:  017A
 L0054:  034A            L0046:  0821
 L0067:  0365            L0047:  0B00
@@ -2606,7 +2681,7 @@ L0095:  04CC            L0064:  089C
 L0099:  04F2            L0065:  0B8F
 L0096:  04F8            L0066:  0300
 L0101:  0518            L0067:  0365
-L0102:  052B            L0068:  0337
+L0102:  052B            CursorInit:  0337
 L0104:  0543            L0069:  0905
 L0103:  0552            L0070:  0378
 L0115:  057B            L0071:  0390
