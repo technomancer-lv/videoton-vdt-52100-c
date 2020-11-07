@@ -3,10 +3,10 @@
 ;--------------------------------------------------
 
 ;Peripherials:
-;04h - 
-;0Ch - 
-;0Eh -
-;0Fh - keyboard related, input
+;04h - keyboard
+;0Ch - keyboard
+;0Eh - keyboard
+;0Fh - keyboard related, input and output
 ;1Ah - 8251 data reg
 ;1Bh - 8251 control reg
 ;1Dh - baudrate control
@@ -30,7 +30,7 @@
 ;Control regiters:
 ;4000,1h - initialised with 003Dh? An address that is used for a loop at one point.
 ;4002,3h - seems like current symbol address in memory, cursor position. Highest bit seems to disable the output on the screen
-;4004h - something video related
+;4004h - something video related? Or keyboard variable?
 ;4005h - current line number?
 ;4006h - current symbol number in line?
 ;4007h - seems like program status register
@@ -75,7 +75,7 @@ ProgStart:  	MVI A,0FH		;Program start - address 0000h
 
 				LXI H,003DH
 				SHLD 4000H		;?	Saves an address in the very first address of the RAM
-							;But why? At some point it jumps to that address.
+								;But why? At some point it uses this as a loop address.
 
 				LXI H,1000H
 				MVI A,0FBH		;Tests if there is a 0xFB at the 0x1000
@@ -93,7 +93,8 @@ ProgStart:  	MVI A,0FH		;Program start - address 0000h
 		
 				LXI H,0D9CH
 				LXI D,4002H
-				CALL L0002		;Copies some data from ROM to RAM. What data?
+				CALL L0002		;Copies some data from ROM to RAM. What data? Seems like
+								;status reg init.
 	
 							;Inits:
 							;..
@@ -116,9 +117,14 @@ ProgLoop:		CALL	L0004			;Serial routine, reads data from the FIFO if available
 
 				RST 7
 				RST 7
-				PUSH H			;Strange loop
+				PUSH H			;INT?
 				LHLD 4000H
-				PCHL
+				PCHL			;Here it takes the value from the RAM and jumps to that address.
+								;It might seem strange, but this address is the next instruction and thi address is
+								;not modified anywhere in the program. However, this value might be modified
+								;from the program that might be stored in the additional program
+								;cartridge so that interrupt routine might be processed by the
+								;additional program.
 
 				PUSH PSW
 				PUSH D
@@ -284,6 +290,7 @@ L0015:			LXI H,48B2H		;Status line start address
 0167   014F D3 1B               OUT 1BH		
 0168   0151 78                  MOV A,B		;Sets the 8251 mode parameter
 0169   0152 D3 1B               OUT 1BH
+
 0170   0154 3A 07 40    L0022:  LDA 4007H	;Tests if it's online? Or transmission disabled?
 0171   0157 E6 80               ANI 80H		
 0172   0159 3E 27               MVI A,27H
@@ -966,26 +973,27 @@ L0155:  CALL L0121		;Can jump here using L0051
 0774   066E C8                  RZ
 0775   066F CD 61 0B            CALL L0121
 0776   0672 C8                  RZ
-0777   0673 3E 09       L0125:  MVI A,09H
-0778   0675 CD 89 0B            CALL L0021
-0779   0678 AF                  XRA A
-0780   0679 32 06 40            STA 4006H
-0781   067C CD 8D 09            CALL L0062
-0782   067F 11 F3 01    L0123:  LXI D,01F3H
-0783   0682 CD A9 06            CALL L0122
-0784   0685 3A 07 40            LDA 4007H
-0785   0688 E6 08               ANI 08H
-0786   068A C2 7F 06            JNZ L0123
-0787   068D 3A 07 40            LDA 4007H
-0788   0690 E6 02               ANI 02H
-0789   0692 C0                  RNZ
-0790   0693 DB 1B       L0124:  IN 1BH		;Serial
-0791   0695 E6 04               ANI 04H
-0792   0697 CA 93 06            JZ L0124
-0793   069A C3 54 01            JMP L0022
+
+L0125:			MVI A,09H
+				CALL L0021
+				XRA A
+				STA 4006H		;Clears cursor position in line
+				CALL L0062		;Set cursor absolute address
+L0123:			LXI D,01F3H
+				CALL L0122
+				LDA 4007H
+				ANI 08H
+				JNZ L0123
+				LDA 4007H
+				ANI 02H
+				RNZ
+L0124:			IN 1BH		;Serial
+				ANI 04H
+				JZ L0124
+				JMP L0022
 
 UNP1B:			MVI A,27H		;ESC code
-				OUT 1BH		;Serial
+				OUT 1BH			;Sets 8251 enabled and working
 				MVI A,0FH
 				CALL L0065
 				JMP L0125
